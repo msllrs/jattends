@@ -47,6 +47,8 @@ enum TerminalActivator {
     /// Find and raise a window matching the session's cwd using the Accessibility API.
     /// Checks AXDocument (file URL of the working directory) and AXTitle as fallback.
     private static func activateByAX(pid: Int, session: SessionInfo) -> Bool {
+        guard AXIsProcessTrusted() else { return false }
+
         let appElement = AXUIElementCreateApplication(pid_t(pid))
 
         var windowsRef: CFTypeRef?
@@ -88,6 +90,7 @@ enum TerminalActivator {
 
     private static func raiseWindowAndActivate(window: AXUIElement, pid: Int) -> Bool {
         AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+        AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, true as CFTypeRef)
         if let app = NSRunningApplication(processIdentifier: pid_t(pid)) {
             app.activate()
         }
@@ -109,26 +112,26 @@ enum TerminalActivator {
         let cwdPath = session.cwd
 
         let script = """
+        tell application "\(appName)" to activate
+
         tell application "System Events"
-            if not (exists process "\(appName)") then return "no_process"
             tell process "\(appName)"
-                set windowList to every window
-                repeat with w in windowList
-                    if name of w contains "\(projectName)" then
-                        perform action "AXRaise" of w
-                        set frontmost to true
-                        tell application "\(appName)" to activate
-                        return "found"
-                    end if
-                end repeat
-                repeat with w in windowList
-                    if name of w contains "\(cwdPath)" then
-                        perform action "AXRaise" of w
-                        set frontmost to true
-                        tell application "\(appName)" to activate
-                        return "found"
-                    end if
-                end repeat
+                set frontmost to true
+                try
+                    set windowList to every window
+                    repeat with w in windowList
+                        if name of w contains "\(projectName)" then
+                            perform action "AXRaise" of w
+                            return "found"
+                        end if
+                    end repeat
+                    repeat with w in windowList
+                        if name of w contains "\(cwdPath)" then
+                            perform action "AXRaise" of w
+                            return "found"
+                        end if
+                    end repeat
+                end try
             end tell
         end tell
         return "not_found"

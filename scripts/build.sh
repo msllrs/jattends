@@ -27,7 +27,7 @@ cp "$BINARY" "$APP_DIR/Contents/MacOS/Jattends"
 cp "$PROJECT_DIR/Resources/Info.plist" "$APP_DIR/Contents/Info.plist"
 
 echo "Signing (ad-hoc)..."
-codesign --force --sign - "$APP_DIR/Contents/MacOS/Jattends"
+codesign --force --sign - "$APP_DIR"
 
 echo ""
 echo "Built: $APP_DIR"

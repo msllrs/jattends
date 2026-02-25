@@ -21,6 +21,9 @@ rm -rf "$APP_DST"
 cp -R "$APP_SRC" "$APP_DST"
 echo "Installed: $APP_DST"
 
+# Reset Accessibility trust (ad-hoc signing changes identity each build)
+tccutil reset Accessibility com.jattends.app 2>/dev/null || true
+
 # Install hook script
 echo ""
 echo "Installing hook script..."
