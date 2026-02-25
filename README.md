@@ -17,7 +17,7 @@ Jattends sits in your menubar. Claude Code [hooks](https://docs.anthropic.com/en
 ## Install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/jattends.git
+git clone https://github.com/msllrs/jattends.git
 cd jattends
 bash scripts/install.sh
 ```
