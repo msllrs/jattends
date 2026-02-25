@@ -65,19 +65,16 @@ scripts/jattends-hook.sh     Claude Code hook — writes session JSON to disk
   └─ ~/.claude/jattends/sessions/{session_id}.json
 
 Sources/Jattends/
-  JattendsApp.swift           App entry point, menubar status item + popover
+  JattendsApp.swift           App entry point, NSMenu-based menubar dropdown
   Models/
     SessionInfo.swift         Session data model (id, cwd, status, terminal info)
     SessionStatus.swift       Status enum: waiting / active / idle
   Services/
     SessionStore.swift        Reads session files, exposes observable state
     SessionDirectoryWatcher.swift   FSEvents watcher for the sessions directory
-    TerminalActivator.swift   Activates the right terminal window via AppleScript
+    TerminalActivator.swift   Activates the right terminal window via Accessibility API
   Views/
     MenuBarIcon.swift         SVG-based menubar icon (normal + badge variants)
-    SessionListView.swift     Popover content: header, session list, quit button
-    SessionRowView.swift      Single session row with status indicator
-    EmptyStateView.swift      Shown when no sessions need attention
 ```
 
 ## Supported terminals
