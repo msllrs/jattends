@@ -48,10 +48,10 @@ Then add the following to `~/.claude/settings.json`:
 ```json
 {
   "hooks": {
-    "Notification": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/jattends-hook.sh", "async": true }] }],
-    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/jattends-hook.sh", "async": true }] }],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/jattends-hook.sh", "async": true }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/jattends-hook.sh", "async": true }] }],
+    "Notification": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/jattends-hook.sh" }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/jattends-hook.sh" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/jattends-hook.sh" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/jattends-hook.sh" }] }],
     "SessionStart": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/jattends-hook.sh" }] }],
     "SessionEnd": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/jattends-hook.sh" }] }]
   }

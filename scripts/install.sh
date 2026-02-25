@@ -50,18 +50,19 @@ else:
 
 hooks = settings.setdefault("hooks", {})
 
-# Hook definitions: event -> whether the hook should be async
-hook_events = {
-    "Notification":      True,
-    "PermissionRequest": True,
-    "Stop":              True,
-    "UserPromptSubmit":  True,
-    "SessionStart":      False,
-    "SessionEnd":        False,
-}
+# Hook events to register (all synchronous — the script is fast enough
+# and synchronous hooks don't produce "Async hook completed" messages)
+hook_events = [
+    "Notification",
+    "PermissionRequest",
+    "Stop",
+    "UserPromptSubmit",
+    "SessionStart",
+    "SessionEnd",
+]
 
 changed = False
-for event, is_async in hook_events.items():
+for event in hook_events:
     matchers = hooks.setdefault(event, [])
 
     # Check if our hook command is already present in any matcher
@@ -75,10 +76,7 @@ for event, is_async in hook_events.items():
             break
 
     if not already_present:
-        entry = {"type": "command", "command": hook_cmd}
-        if is_async:
-            entry["async"] = True
-        matchers.append({"hooks": [entry]})
+        matchers.append({"hooks": [{"type": "command", "command": hook_cmd}]})
         changed = True
 
 if changed:
