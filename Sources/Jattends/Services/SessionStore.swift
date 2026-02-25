@@ -1,0 +1,79 @@
+import Foundation
+import SwiftUI
+
+@Observable
+final class SessionStore {
+    private(set) var sessions: [SessionInfo] = []
+    private var watcher: SessionDirectoryWatcher?
+
+    private static let sessionsDirectory: URL = {
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/jattends/sessions")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }()
+
+    /// Only sessions needing attention.
+    var waitingSessions: [SessionInfo] {
+        sessions.filter { $0.status == .waiting }
+    }
+
+    var waitingCount: Int {
+        waitingSessions.count
+    }
+
+    var hasWaiting: Bool {
+        waitingCount > 0
+    }
+
+    func startWatching() {
+        reload()
+
+        let dir = Self.sessionsDirectory.path
+        watcher = SessionDirectoryWatcher(directory: dir) { [weak self] in
+            Task { @MainActor in
+                self?.reload()
+            }
+        }
+        watcher?.start()
+    }
+
+    func stopWatching() {
+        watcher?.stop()
+        watcher = nil
+    }
+
+    private func reload() {
+        let fm = FileManager.default
+        let dir = Self.sessionsDirectory
+
+        guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+            .filter({ $0.pathExtension == "json" })
+        else {
+            sessions = []
+            return
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        var loaded: [SessionInfo] = []
+        for file in files {
+            guard let data = try? Data(contentsOf: file),
+                  let session = try? decoder.decode(SessionInfo.self, from: data),
+                  !session.isStale
+            else {
+                // Remove stale or unreadable files
+                try? fm.removeItem(at: file)
+                continue
+            }
+            loaded.append(session)
+        }
+
+        // Sort: waiting first, then active, then idle; within each group sort by updatedAt descending
+        sessions = loaded.sorted { a, b in
+            if a.status != b.status { return a.status < b.status }
+            return a.updatedAt > b.updatedAt
+        }
+    }
+}
