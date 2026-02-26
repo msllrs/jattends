@@ -8,6 +8,14 @@ A macOS menubar app that monitors your [Claude Code](https://docs.anthropic.com/
 
 Jattends sits in your menubar. Claude Code [hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) write session state to disk whenever something changes — a notification fires, a tool needs approval, a turn finishes with a question, or a session starts/ends. Jattends watches the session directory and shows a badge when any session is waiting for you. Click a session to jump straight to the right terminal window.
 
+### Optional features (off by default)
+
+- **Notifications** — native macOS notifications when a session starts waiting. Click to jump straight to it.
+- **Sound alerts** — play a system sound on new waiting sessions. Choose from built-in sounds, with an option to repeat until dismissed.
+- **Global keyboard shortcut** — jump to the most recent waiting session from any app (default: Cmd+Shift+J when enabled).
+
+All configured in **Settings** (click the menubar icon → Settings).
+
 ## Requirements
 
 - macOS 14+
@@ -73,8 +81,11 @@ Sources/Jattends/
     SessionStore.swift        Reads session files, exposes observable state
     SessionDirectoryWatcher.swift   FSEvents watcher for the sessions directory
     TerminalActivator.swift   Activates the right terminal window via Accessibility API
+    NotificationManager.swift macOS notifications + sound alerts
+    HotkeyManager.swift       Global keyboard shortcut
   Views/
     MenuBarIcon.swift         SVG-based menubar icon (normal + badge variants)
+    PreferencesView.swift     Settings UI (notifications, sound, shortcut)
 ```
 
 ## Supported terminals
