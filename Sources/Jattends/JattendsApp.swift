@@ -93,23 +93,32 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             header.isEnabled = false
             menu.addItem(header)
 
+            let clearAll = NSMenuItem(title: "Clear All", action: #selector(clearAllSessions), keyEquivalent: "")
+            clearAll.target = self
+            clearAll.isAlternate = true
+            clearAll.keyEquivalentModifierMask = .option
+            menu.addItem(clearAll)
+
             menu.addItem(NSMenuItem.separator())
 
             for session in sessions {
+                // Normal click: focus terminal
                 let item = NSMenuItem(title: session.projectName, action: #selector(sessionClicked(_:)), keyEquivalent: "")
                 item.target = self
                 item.representedObject = session
-
-                // Color bar + project name
-                let barColor: NSColor = session.status == .waiting
-            ? NSColor(red: 0xd7/255, green: 0x77/255, blue: 0x57/255, alpha: 1)
-            : .systemGreen
-                item.attributedTitle = makeAttributedTitle(
-                    bar: barColor,
-                    name: session.projectName
-                )
-
+                let barColor: NSColor = NSColor(red: 0xd7/255, green: 0x77/255, blue: 0x57/255, alpha: 1)
+                item.attributedTitle = makeAttributedTitle(bar: barColor, name: session.projectName)
                 menu.addItem(item)
+
+                // Option+click: dismiss session
+                let alt = NSMenuItem(title: session.projectName, action: #selector(dismissSession(_:)), keyEquivalent: "")
+                alt.target = self
+                alt.representedObject = session
+                alt.isAlternate = true
+                alt.keyEquivalentModifierMask = .option
+                alt.image = NSImage(systemSymbolName: "xmark.circle", accessibilityDescription: "Dismiss")
+                alt.image?.size = NSSize(width: 14, height: 14)
+                menu.addItem(alt)
             }
         }
 
@@ -117,8 +126,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let settings = NSMenuItem(title: "Settings\u{2026}", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
-        settings.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")
-        settings.image?.size = NSSize(width: 14, height: 14)
         menu.addItem(settings)
 
         let quit = NSMenuItem(title: "Quit Jattends", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -171,5 +178,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         result.append(NSAttributedString(string: name, attributes: nameAttrs))
 
         return result
+    }
+
+    @objc private func clearAllSessions() {
+        let sessionDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/jattends/sessions")
+        if let files = try? FileManager.default.contentsOfDirectory(at: sessionDir, includingPropertiesForKeys: nil) {
+            for file in files where file.pathExtension == "json" {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
+    }
+
+    @objc private func dismissSession(_ sender: NSMenuItem) {
+        guard let session = sender.representedObject as? SessionInfo else { return }
+        let sessionFile = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/jattends/sessions/\(session.sessionId).json")
+        try? FileManager.default.removeItem(at: sessionFile)
     }
 }
