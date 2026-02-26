@@ -4,6 +4,8 @@ A menubar app that tells you when your [Claude Code](https://docs.anthropic.com/
 
 *From French "j'attends" — "I'm waiting."*
 
+![Jattends menubar dropdown](Resources/screenshot.png)
+
 ## Install
 
 ```bash
