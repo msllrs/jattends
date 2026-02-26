@@ -47,6 +47,19 @@ bash scripts/install.sh --reset-accessibility  # Also reset Accessibility TCC
 - **Settings window**: managed directly via `NSWindow` + `NSHostingView` rather than SwiftUI `Settings` scene, which doesn't work reliably in LSUIElement apps.
 - **Newly-waiting tracking**: `SessionStore.consumeNewlyWaiting()` returns and clears the list to prevent the 0.5s timer from re-triggering notifications on every tick.
 
+## Dev vs public deploy
+
+| Concern | Dev (iterating locally) | Public (end user installs once) |
+|---------|------------------------|--------------------------------|
+| Install command | `bash scripts/install.sh` | `bash scripts/install.sh` |
+| Accessibility TCC reset | Skipped (signature changes each build, would prompt every time) | Auto-resets on first install (no existing app in `/Applications`) |
+| Accessibility prompt | Once per launch, on first session click | Once per launch, on first session click |
+| Force reset | `bash scripts/install.sh --reset-accessibility` | Not needed |
+| Code signing | Ad-hoc (`codesign -s -`), identity changes each build | Same ad-hoc — but user only installs once so grant persists |
+| App restart | `install.sh` auto-quits and relaunches | Same |
+
+**Key gotcha**: ad-hoc signing gives the app a new code identity on every build. macOS ties Accessibility grants to code identity, so dev rebuilds invalidate the grant. This is why the install script skips `tccutil reset` on reinstall and why `TerminalActivator` only prompts once per launch. End users who install once don't hit this issue.
+
 ## UserDefaults keys
 
 | Key | Type | Default | Purpose |
