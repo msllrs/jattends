@@ -2,9 +2,9 @@
 
 A menubar app that tells you when your [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions need attention.
 
-*From French "j'attends" — "I'm waiting."*
-
 <img src="Resources/screenshot.png" alt="Jattends menubar dropdown" width="420">
+
+*From French "j'attends" — "I'm waiting."*
 
 ## Install
 
