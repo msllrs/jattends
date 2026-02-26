@@ -5,6 +5,8 @@ struct PreferencesView: View {
     @AppStorage("soundEnabled") private var soundEnabled = false
     @AppStorage("alertSoundName") private var alertSoundName = "Glass"
     @AppStorage("soundRepeat") private var soundRepeat = false
+    @AppStorage("soundRepeatTimeout") private var soundRepeatTimeout = 120.0
+    @AppStorage("autoClearMinutes") private var autoClearMinutes = 0
     @AppStorage("hotkeyEnabled") private var hotkeyEnabled = false
     @AppStorage("hotkeyKeyCode") private var hotkeyKeyCode = HotkeyManager.defaultKeyCode
     @AppStorage("hotkeyModifiers") private var hotkeyModifiers = HotkeyManager.defaultModifiers
@@ -45,12 +47,35 @@ struct PreferencesView: View {
                 }
                 .disabled(!soundEnabled)
 
+                Picker("Repeat timeout", selection: $soundRepeatTimeout) {
+                    Text("1 minute").tag(60.0)
+                    Text("2 minutes").tag(120.0)
+                    Text("5 minutes").tag(300.0)
+                    Text("No limit").tag(0.0)
+                }
+                .disabled(!soundEnabled || !soundRepeat)
+
                 Button("Preview") {
                     NSSound(named: NSSound.Name(alertSoundName))?.play()
                 }
                 .disabled(!soundEnabled)
             } header: {
                 Text("Sound")
+            }
+
+            Section {
+                Picker("Auto-clear waiting sessions", selection: $autoClearMinutes) {
+                    Text("Never").tag(0)
+                    Text("After 15 minutes").tag(15)
+                    Text("After 30 minutes").tag(30)
+                    Text("After 1 hour").tag(60)
+                    Text("After 2 hours").tag(120)
+                }
+            } header: {
+                Text("Sessions")
+            } footer: {
+                Text("Automatically dismiss waiting sessions after a period of inactivity.")
+                    .foregroundStyle(.secondary)
             }
 
             Section {

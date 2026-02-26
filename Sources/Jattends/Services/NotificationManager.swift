@@ -10,6 +10,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     private var onFocusSession: ((SessionInfo) -> Void)?
     private var repeatTimer: Timer?
+    private var repeatStartTime: Date?
     private var currentSound: NSSound?
 
     override init() {
@@ -62,13 +63,23 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         playSound()
 
         if UserDefaults.standard.bool(forKey: "soundRepeat"), repeatTimer == nil {
+            repeatStartTime = Date()
+            let timeout = UserDefaults.standard.double(forKey: "soundRepeatTimeout")
+            let maxDuration: TimeInterval = timeout > 0 ? timeout : 120 // default 2 minutes
+
             repeatTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
-                guard UserDefaults.standard.bool(forKey: "soundEnabled"),
+                guard let self,
+                      UserDefaults.standard.bool(forKey: "soundEnabled"),
                       UserDefaults.standard.bool(forKey: "soundRepeat") else {
                     self?.stopRepeatingSound()
                     return
                 }
-                self?.playSound()
+                // Auto-stop after timeout
+                if let start = self.repeatStartTime, Date().timeIntervalSince(start) >= maxDuration {
+                    self.stopRepeatingSound()
+                    return
+                }
+                self.playSound()
             }
         }
     }
@@ -77,6 +88,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     func stopRepeatingSound() {
         repeatTimer?.invalidate()
         repeatTimer = nil
+        repeatStartTime = nil
         currentSound?.stop()
         currentSound = nil
     }

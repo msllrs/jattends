@@ -66,6 +66,9 @@ final class SessionStore {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
 
+        let autoClearMinutes = UserDefaults.standard.integer(forKey: "autoClearMinutes")
+        let autoClearInterval: TimeInterval? = autoClearMinutes > 0 ? TimeInterval(autoClearMinutes * 60) : nil
+
         var loaded: [SessionInfo] = []
         for file in files {
             guard let data = try? Data(contentsOf: file),
@@ -73,6 +76,13 @@ final class SessionStore {
                   !session.isStale
             else {
                 // Remove stale or unreadable files
+                try? fm.removeItem(at: file)
+                continue
+            }
+            // Auto-clear waiting sessions past the configured timeout
+            if let interval = autoClearInterval,
+               session.status == .waiting,
+               Date().timeIntervalSince(session.updatedAt) > interval {
                 try? fm.removeItem(at: file)
                 continue
             }
