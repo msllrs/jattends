@@ -70,9 +70,22 @@ case "$EVENT" in
         # User responded — Claude is working again, no longer needs attention
         write_session "active"
         ;;
-    Notification|PermissionRequest)
-        # Claude needs user attention (notification, tool permission, or question)
+    PermissionRequest)
+        # Tool permission — always needs attention
         write_session "waiting"
+        ;;
+    Notification)
+        # Only mark as waiting if the message ends with '?' (asking a question)
+        ENDS_WITH_QUESTION=$(echo "$INPUT" | /usr/bin/python3 -c "
+import sys, json
+msg = json.load(sys.stdin).get('last_assistant_message', '')
+print('yes' if msg.rstrip().endswith('?') else 'no')
+")
+        if [ "$ENDS_WITH_QUESTION" = "yes" ]; then
+            write_session "waiting"
+        else
+            write_session "active"
+        fi
         ;;
     Stop)
         # Only notify if Claude's last message ends with '?' (asking a question)
