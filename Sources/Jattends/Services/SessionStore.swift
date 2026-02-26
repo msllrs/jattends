@@ -4,7 +4,16 @@ import SwiftUI
 @Observable
 final class SessionStore {
     private(set) var sessions: [SessionInfo] = []
+    private(set) var newlyWaitingSessions: [SessionInfo] = []
+
+    /// Consume newly-waiting sessions so they aren't re-processed.
+    func consumeNewlyWaiting() -> [SessionInfo] {
+        let result = newlyWaitingSessions
+        newlyWaitingSessions = []
+        return result
+    }
     private var watcher: SessionDirectoryWatcher?
+    private var previousWaitingIds: Set<String> = []
 
     private static let sessionsDirectory: URL = {
         let dir = FileManager.default.homeDirectoryForCurrentUser
@@ -75,5 +84,11 @@ final class SessionStore {
             if a.status != b.status { return a.status < b.status }
             return a.updatedAt > b.updatedAt
         }
+
+        // Track newly-waiting sessions (those that just transitioned to waiting)
+        let currentWaitingIds = Set(sessions.filter { $0.status == .waiting }.map(\.sessionId))
+        let newIds = currentWaitingIds.subtracting(previousWaitingIds)
+        newlyWaitingSessions = sessions.filter { newIds.contains($0.sessionId) }
+        previousWaitingIds = currentWaitingIds
     }
 }

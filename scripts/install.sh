@@ -14,6 +14,17 @@ HOOK_SRC="${SCRIPT_DIR}/jattends-hook.sh"
 HOOK_DST="${HOME}/.claude/hooks/jattends-hook.sh"
 SETTINGS_FILE="${HOME}/.claude/settings.json"
 
+# Track whether this is a fresh install
+FRESH_INSTALL=false
+[[ ! -d "$APP_DST" ]] && FRESH_INSTALL=true
+
+# Quit running instance if any
+if pgrep -xq Jattends; then
+    echo "Quitting running Jattends..."
+    killall Jattends 2>/dev/null || true
+    sleep 0.5
+fi
+
 # Install app
 echo ""
 echo "Installing to /Applications..."
@@ -21,8 +32,11 @@ rm -rf "$APP_DST"
 cp -R "$APP_SRC" "$APP_DST"
 echo "Installed: $APP_DST"
 
-# Reset Accessibility trust (ad-hoc signing changes identity each build)
-tccutil reset Accessibility com.jattends.app 2>/dev/null || true
+# Reset Accessibility trust on first install or when explicitly requested.
+# Skipped on reinstall (dev workflow) since ad-hoc signing changes identity each build.
+if [[ "$FRESH_INSTALL" == "true" ]] || [[ " $* " == *" --reset-accessibility "* ]]; then
+    tccutil reset Accessibility com.jattends.app 2>/dev/null || true
+fi
 
 # Install hook script
 echo ""

@@ -16,10 +16,19 @@ enum TerminalActivator {
         "tmux": "Ghostty", // tmux inherits parent; default to common host
     ]
 
+    private static var hasPromptedAccessibility = false
+
     /// Activate the terminal window for a session.
     /// Uses the Accessibility API to find a window whose AXDocument matches the session's cwd,
     /// falling back to AXTitle matching, then PID-based app activation as last resort.
     static func activate(session: SessionInfo) {
+        // Prompt for Accessibility permission once per launch
+        if !hasPromptedAccessibility && !AXIsProcessTrusted() {
+            hasPromptedAccessibility = true
+            let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
+            AXIsProcessTrustedWithOptions(opts)
+        }
+
         // Try AX-based window matching (AXDocument, then AXTitle)
         if let pid = session.terminalPid, activateByAX(pid: pid, session: session) {
             return
