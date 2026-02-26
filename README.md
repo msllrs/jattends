@@ -4,7 +4,7 @@ A menubar app that tells you when your [Claude Code](https://docs.anthropic.com/
 
 *From French "j'attends" — "I'm waiting."*
 
-![Jattends menubar dropdown](Resources/screenshot.png)
+<img src="Resources/screenshot.png" alt="Jattends menubar dropdown" width="400">
 
 ## Install
 
