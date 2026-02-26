@@ -66,6 +66,9 @@ struct PreferencesView: View {
                 HStack {
                     Text("Shortcut:")
                     Spacer()
+                    Button(isRecordingShortcut ? "Cancel" : "Record Shortcut") {
+                        isRecordingShortcut.toggle()
+                    }
                     if isRecordingShortcut {
                         Text("Press shortcut...")
                             .foregroundStyle(.secondary)
@@ -77,9 +80,6 @@ struct PreferencesView: View {
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
                             .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
-                    }
-                    Button(isRecordingShortcut ? "Cancel" : "Record Shortcut") {
-                        isRecordingShortcut.toggle()
                     }
                 }
                 .disabled(!hotkeyEnabled)
