@@ -1,26 +1,8 @@
 # Jattends
 
-A macOS menubar app that monitors your [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions and tells you when they need attention.
+A menubar app that tells you when your [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions need attention.
 
 *From French "j'attends" — "I'm waiting."*
-
-## How it works
-
-Jattends sits in your menubar. Claude Code [hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) write session state to disk whenever something changes — a notification fires, a tool needs approval, a turn finishes with a question, or a session starts/ends. Jattends watches the session directory and shows a badge when any session is waiting for you. Click a session to jump straight to the right terminal window.
-
-### Optional features (off by default)
-
-- **Notifications** — native macOS notifications when a session starts waiting. Click to jump straight to it.
-- **Sound alerts** — play a system sound on new waiting sessions. Choose from built-in sounds, with an option to repeat until dismissed.
-- **Global keyboard shortcut** — jump to the most recent waiting session from any app (default: Cmd+Shift+J when enabled).
-
-All configured in **Settings** (click the menubar icon → Settings).
-
-## Requirements
-
-- macOS 14+
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
-- Swift 5.10+ (ships with Xcode 15.3+)
 
 ## Install
 
@@ -30,75 +12,34 @@ cd jattends
 bash scripts/install.sh
 ```
 
-The install script will:
-1. Build the app from source
-2. Copy `Jattends.app` to `/Applications`
-3. Install the hook script to `~/.claude/hooks/`
-4. Auto-configure Claude Code hooks in `~/.claude/settings.json`
-5. Launch the app
-
 Grant **Accessibility** permission when prompted — this lets Jattends raise the correct terminal window when you click a session.
 
-## Manual setup
+## How it works
 
-If you prefer to configure hooks yourself, build and install the app:
+Jattends uses Claude Code [hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) to track session state. When something needs your attention — a tool approval, a question, a notification — a badge appears in your menubar. Click a session to jump straight to the right terminal window.
 
-```bash
-bash scripts/build.sh
-cp -R .build/Jattends.app /Applications/
-cp scripts/jattends-hook.sh ~/.claude/hooks/
-chmod +x ~/.claude/hooks/jattends-hook.sh
-mkdir -p ~/.claude/jattends/sessions
-```
+## Features
 
-Then add the following to `~/.claude/settings.json`:
+- **Menubar badge** — see at a glance when sessions are waiting
+- **Terminal focus** — click a session to raise the exact window
+- **Notifications** — native macOS notifications when a session starts waiting
+- **Sound alerts** — play a system sound, with an option to repeat until dismissed
+- **Global shortcut** — jump to the most recent waiting session from any app
+- **Multi-terminal** — Ghostty, Terminal.app, iTerm2, kitty, Warp, Alacritty, WezTerm, Hyper, VS Code
 
-```json
-{
-  "hooks": {
-    "Notification": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/jattends-hook.sh" }] }],
-    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/jattends-hook.sh" }] }],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/jattends-hook.sh" }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/jattends-hook.sh" }] }],
-    "SessionStart": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/jattends-hook.sh" }] }],
-    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "~/.claude/hooks/jattends-hook.sh" }] }]
-  }
-}
-```
+Notifications, sound, and the shortcut are off by default. Configure in Settings (menubar icon → Settings).
 
-## Architecture
+## Requirements
 
-```
-scripts/jattends-hook.sh     Claude Code hook — writes session JSON to disk
-  └─ ~/.claude/jattends/sessions/{session_id}.json
-
-Sources/Jattends/
-  JattendsApp.swift           App entry point, NSMenu-based menubar dropdown
-  Models/
-    SessionInfo.swift         Session data model (id, cwd, status, terminal info)
-    SessionStatus.swift       Status enum: waiting / active / idle
-  Services/
-    SessionStore.swift        Reads session files, exposes observable state
-    SessionDirectoryWatcher.swift   FSEvents watcher for the sessions directory
-    TerminalActivator.swift   Activates the right terminal window via Accessibility API
-    NotificationManager.swift macOS notifications + sound alerts
-    HotkeyManager.swift       Global keyboard shortcut
-  Views/
-    MenuBarIcon.swift         SVG-based menubar icon (normal + badge variants)
-    PreferencesView.swift     Settings UI (notifications, sound, shortcut)
-```
-
-## Supported terminals
-
-Ghostty, Terminal.app, iTerm2, kitty, Warp, Alacritty, WezTerm, Hyper, VS Code (terminal)
+- macOS 14+
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+- Swift 5.10+ (Xcode 15.3+)
 
 ## Uninstall
 
 ```bash
 bash scripts/uninstall.sh
 ```
-
-This removes the app, hook script, session data, and hook entries from your Claude Code settings.
 
 ## License
 
