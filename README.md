@@ -24,12 +24,14 @@ Jattends uses Claude Code [hooks](https://docs.anthropic.com/en/docs/claude-code
 
 - **Menubar badge** — see at a glance when sessions are waiting
 - **Terminal focus** — click a session to raise the exact window
+- **Dismiss** — Option+click a session to dismiss it, or Option+click the header to clear all
 - **Notifications** — native macOS notifications when a session starts waiting
 - **Sound alerts** — play a system sound, with an option to repeat until dismissed
 - **Global shortcut** — jump to the most recent waiting session from any app
+- **Auto-clear** — automatically dismiss waiting sessions after a configurable timeout
 - **Multi-terminal** — Ghostty, Terminal.app, iTerm2, kitty, Warp, Alacritty, WezTerm, Hyper, VS Code
 
-Notifications, sound, and the shortcut are off by default. Configure in Settings (menubar icon → Settings).
+Notifications, sound, shortcut, and auto-clear are off by default. Configure in Settings (menubar icon → Settings).
 
 ## Requirements
 
