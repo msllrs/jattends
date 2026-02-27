@@ -1,10 +1,6 @@
-<img src="Resources/icon.png" alt="Jattends icon" width="48" align="left" style="margin-right: 12px;">
+<img src="Resources/icon.png" alt="Jattends icon" width="64">
 
-# Jattends
-
-A menubar app that tells you when your [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions need attention.
-
-<img src="Resources/screenshot.png" alt="Jattends menubar dropdown" width="420">
+Jattends is a menubar app that tells you when your [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions need attention.
 
 *From French "j'attends" — "I'm waiting."*
 
@@ -21,6 +17,8 @@ Grant **Accessibility** permission when prompted — this lets Jattends raise th
 ## How it works
 
 Jattends uses Claude Code [hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) to track session state. When something needs your attention — a tool approval, a question, a notification — a badge appears in your menubar. Click a session to jump straight to the right terminal window.
+
+<img src="Resources/screenshot.png" alt="Jattends menubar dropdown" width="420">
 
 ## Features
 
