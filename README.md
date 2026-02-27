@@ -1,3 +1,5 @@
+<img src="Resources/icon.png" alt="Jattends icon" width="48" align="left" style="margin-right: 12px;">
+
 # Jattends
 
 A menubar app that tells you when your [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions need attention.
