@@ -15,10 +15,12 @@ A Raycast extension for quickly switching between Claude Code sessions. Compleme
 ```bash
 cd raycast-extension
 npm install
-npm run dev
+npm run build
 ```
 
-Then open Raycast and search "Switch Claude Session".
+Then open Raycast, search "Import Extension", and select the `raycast-extension` folder. The extension persists across Raycast restarts.
+
+For development, use `npm run dev` instead of `npm run build` to get auto-reload on file changes.
 
 ## Requirements
 
