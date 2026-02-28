@@ -33,6 +33,10 @@ Jattends uses Claude Code [hooks](https://docs.anthropic.com/en/docs/claude-code
 
 Notifications, sound, shortcut, and auto-clear are off by default. Configure in Settings (menubar icon → Settings).
 
+## Raycast Extension
+
+A companion [Raycast](https://www.raycast.com/) extension for fast fuzzy-search session switching. See [`raycast-extension/`](raycast-extension/) for setup.
+
 ## Requirements
 
 - macOS 14+

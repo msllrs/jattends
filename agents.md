@@ -83,21 +83,22 @@ Written by `jattends-hook.sh` to `~/.claude/jattends/sessions/{sessionId}.json`:
   "status": "waiting",
   "terminalApp": "ghostty",
   "terminalPid": 12345,
+  "terminalTty": "/dev/ttys000",
   "updatedAt": "2026-02-26T00:00:00Z"
 }
 ```
 
-Status values: `waiting` (needs attention), `active` (Claude working), `idle`.
+Status values: `waiting` (needs attention), `active` (Claude working), `idle` (ready for input).
 
 ## Hook event logic
 
 | Event | Status | Condition |
 |-------|--------|-----------|
-| `SessionStart` | `active` | Always |
+| `SessionStart` | `idle` | Always — session open, waiting for first prompt |
 | `UserPromptSubmit` | `active` | Always — user responded, Claude is working |
 | `PermissionRequest` | `waiting` | Always — tool approval genuinely needs input |
-| `Notification` | `waiting` / `active` | Only `waiting` if `last_assistant_message` ends with `?` |
-| `Stop` | `waiting` / `active` | Only `waiting` if `last_assistant_message` ends with `?` |
+| `Notification` | `waiting` / `idle` | Only `waiting` if `last_assistant_message` ends with `?` |
+| `Stop` | `waiting` / `idle` | Only `waiting` if `last_assistant_message` ends with `?` |
 | `SessionEnd` | *(deleted)* | Session file removed |
 
 **Key design decision**: `Notification` and `Stop` use the `?` check to avoid false "waiting" signals when the user is actively in the session. Without this, every Claude response triggers a notification even though the user is already looking at it.
