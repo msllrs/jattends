@@ -10,6 +10,10 @@ A Raycast extension for quickly switching between Claude Code sessions. Compleme
 - Works with Ghostty, iTerm2, Terminal.app, kitty, Alacritty, WezTerm, and more
 - Automatically cleans up stale sessions
 
+<br />
+<img width="1872" height="1320" alt="ms 2026-02-28 at 02 11 36@2x" src="https://github.com/user-attachments/assets/0d7762f9-7aef-4548-8650-253f2b21b751" />
+<br />
+
 ## Install
 
 ```bash
