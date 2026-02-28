@@ -89,13 +89,21 @@ async function loadSessions(): Promise<ParsedSession[]> {
       const updatedDate = new Date(raw.updatedAt);
       const filePath = join(SESSIONS_DIR, file);
       if (now - updatedDate.getTime() > STALE_MS) {
-        try { unlinkSync(filePath); } catch { /* ignore */ }
+        try {
+          unlinkSync(filePath);
+        } catch {
+          /* ignore */
+        }
         continue;
       }
 
       // Skip and clean up sessions whose terminal process is dead
       if (raw.terminalPid && !isProcessAlive(raw.terminalPid)) {
-        try { unlinkSync(filePath); } catch { /* ignore */ }
+        try {
+          unlinkSync(filePath);
+        } catch {
+          /* ignore */
+        }
         continue;
       }
 
@@ -135,9 +143,7 @@ async function loadSessions(): Promise<ParsedSession[]> {
     if (!s.terminalPid) return true;
     return !all.some(
       (other) =>
-        other.sessionId !== s.sessionId &&
-        other.terminalPid === s.terminalPid &&
-        s.cwd.startsWith(other.cwd + "/"),
+        other.sessionId !== s.sessionId && other.terminalPid === s.terminalPid && s.cwd.startsWith(other.cwd + "/"),
     );
   });
 
@@ -201,9 +207,7 @@ async function activateSession(session: ParsedSession): Promise<void> {
 
   // Resolve TTY: use session file value, or look it up from the claude process
   const tty =
-    session.terminalTty && session.terminalTty !== "not a tty"
-      ? session.terminalTty
-      : findTtyForSession(session.cwd);
+    session.terminalTty && session.terminalTty !== "not a tty" ? session.terminalTty : findTtyForSession(session.cwd);
 
   // Strategy 1: If we have the TTY, write a unique OSC title marker to it,
   // then find the window with that title via System Events. Works with any
