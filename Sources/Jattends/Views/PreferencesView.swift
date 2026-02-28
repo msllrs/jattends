@@ -1,6 +1,8 @@
 import SwiftUI
+import ServiceManagement
 
 struct PreferencesView: View {
+    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @AppStorage("notificationsEnabled") private var notificationsEnabled = false
     @AppStorage("soundEnabled") private var soundEnabled = false
     @AppStorage("alertSoundName") private var alertSoundName = "Glass"
@@ -18,6 +20,23 @@ struct PreferencesView: View {
     var body: some View {
         VStack(spacing: 0) {
         Form {
+            Section {
+                Toggle("Open at Login", isOn: $launchAtLogin)
+                    .onChange(of: launchAtLogin) { _, newValue in
+                        do {
+                            if newValue {
+                                try SMAppService.mainApp.register()
+                            } else {
+                                try SMAppService.mainApp.unregister()
+                            }
+                        } catch {
+                            launchAtLogin = SMAppService.mainApp.status == .enabled
+                        }
+                    }
+            } header: {
+                Text("General")
+            }
+
             Section {
                 Toggle("Enable notifications", isOn: $notificationsEnabled)
                     .onChange(of: notificationsEnabled) { _, newValue in
