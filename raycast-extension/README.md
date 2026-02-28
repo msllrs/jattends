@@ -4,10 +4,6 @@ A [Raycast](https://www.raycast.com/) extension for quickly switching between [C
 
 <img width="1872" height="1320" alt="Jattends Raycast extension screenshot" src="https://github.com/user-attachments/assets/0d7762f9-7aef-4548-8650-253f2b21b751" />
 
-<br />
-<img width="1872" height="1320" alt="ms 2026-02-28 at 02 11 36@2x" src="https://github.com/user-attachments/assets/0d7762f9-7aef-4548-8650-253f2b21b751" />
-<br />
-
 ## Install
 
 ```bash
