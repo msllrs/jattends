@@ -22,7 +22,7 @@ enum SessionStatus: String, Codable, Comparable {
         switch self {
         case .waiting: return "Waiting"
         case .active: return "Working"
-        case .idle: return "Idle"
+        case .idle: return "Ready"
         }
     }
 
