@@ -1,5 +1,3 @@
-<img src="assets/icon.png" alt="Jattends icon" width="64">
-
 A [Raycast](https://www.raycast.com/) extension for quickly switching between [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions. Complements the [Jattends](https://github.com/msllrs/jattends) menubar app.
 
 <img width="1872" height="1320" alt="Jattends Raycast extension screenshot" src="https://github.com/user-attachments/assets/0d7762f9-7aef-4548-8650-253f2b21b751" />
