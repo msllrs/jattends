@@ -62,8 +62,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         // Safety-net periodic reload every 10s to catch missed FSEvents and clean dead PIDs
+        // Also runs --scan to discover untracked claude processes
+        scanForSessions()
         Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+            self?.scanForSessions()
             self?.store.forceReload()
+        }
+    }
+
+    private func scanForSessions() {
+        let hookPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/hooks/jattends-hook.sh").path
+        guard FileManager.default.isExecutableFile(atPath: hookPath) else { return }
+        DispatchQueue.global(qos: .utility).async {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/bash")
+            process.arguments = [hookPath, "--scan"]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try? process.run()
+            process.waitUntilExit()
         }
     }
 
