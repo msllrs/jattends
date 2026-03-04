@@ -44,6 +44,9 @@ get_terminal_pid() {
 
 TERMINAL_PID=$(get_terminal_pid)
 
+# Get the TTY of the current shell for session deduplication and terminal activation
+TERMINAL_TTY=$(tty 2>/dev/null || echo "")
+
 write_session() {
     local status="$1"
     local now
@@ -56,10 +59,12 @@ data = {
     'status': sys.argv[3],
     'terminalApp': sys.argv[4],
     'terminalPid': int(sys.argv[5]) if sys.argv[5] else None,
-    'updatedAt': sys.argv[6]
+    'terminalTty': sys.argv[6] if sys.argv[6] else None,
+    'updatedAt': sys.argv[7]
 }
 print(json.dumps(data))
-" "$SESSION_ID" "$CWD" "$status" "$TERM_APP" "${TERMINAL_PID:-}" "$now" > "$SESSION_FILE"
+" "$SESSION_ID" "$CWD" "$status" "$TERM_APP" "${TERMINAL_PID:-}" "${TERMINAL_TTY:-}" "$now" > "${SESSION_FILE}.tmp" \
+    && mv -f "${SESSION_FILE}.tmp" "$SESSION_FILE"
 }
 
 case "$EVENT" in

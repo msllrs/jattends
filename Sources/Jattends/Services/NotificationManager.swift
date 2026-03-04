@@ -135,12 +135,14 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
                let cwd = userInfo["cwd"] as? String {
                 let terminalApp = userInfo["terminalApp"] as? String
                 let terminalPid = userInfo["terminalPid"] as? Int
+                let terminalTty = userInfo["terminalTty"] as? String
                 let session = SessionInfo(
                     sessionId: sessionId,
                     cwd: cwd,
                     status: .waiting,
                     terminalApp: terminalApp,
                     terminalPid: terminalPid != 0 ? terminalPid : nil,
+                    terminalTty: terminalTty,
                     updatedAt: Date()
                 )
                 DispatchQueue.main.async { [weak self] in
