@@ -177,6 +177,7 @@ print('yes' if msg.rstrip().endswith('?') else 'no')
         fi
         ;;
     Stop)
+        # Claude finished its turn — idle unless asking a question
         ENDS_WITH_QUESTION=$(echo "$INPUT" | /usr/bin/python3 -c "
 import sys, json
 msg = json.load(sys.stdin).get('last_assistant_message', '')
@@ -185,7 +186,7 @@ print('yes' if msg.rstrip().endswith('?') else 'no')
         if [ "$ENDS_WITH_QUESTION" = "yes" ]; then
             write_session "waiting"
         else
-            write_session "active"
+            write_session "idle"
         fi
         ;;
     SessionEnd)
