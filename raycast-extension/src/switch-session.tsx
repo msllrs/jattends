@@ -122,9 +122,18 @@ async function loadSessions(): Promise<ParsedSession[]> {
     }
   }
 
+  // When deduplicating, prefer higher-priority status (waiting > active > idle),
+  // then fall back to most recently updated
+  function shouldReplace(existing: ParsedSession, candidate: ParsedSession): boolean {
+    const existingOrder = STATUS_ORDER[existing.status];
+    const candidateOrder = STATUS_ORDER[candidate.status];
+    if (candidateOrder !== existingOrder) return candidateOrder < existingOrder;
+    return candidate.updatedDate > existing.updatedDate;
+  }
+
   // Deduplicate:
-  // 1. Same TTY → keep only the most recently updated (multiple sessions can't share a TTY)
-  // 2. Same cwd → keep the most recently updated (e.g. subagent + parent on same project)
+  // 1. Same TTY → keep highest-priority status (multiple sessions can't share a TTY)
+  // 2. Same cwd → keep highest-priority status (e.g. real session over discovered)
   // 3. Subdirectory of another session with same PID → discard the child
   const byTty = new Map<string, ParsedSession>();
   const noTty: ParsedSession[] = [];
@@ -132,7 +141,7 @@ async function loadSessions(): Promise<ParsedSession[]> {
     const tty = s.terminalTty && s.terminalTty !== "not a tty" ? s.terminalTty : null;
     if (tty) {
       const existing = byTty.get(tty);
-      if (!existing || s.updatedDate > existing.updatedDate) {
+      if (!existing || shouldReplace(existing, s)) {
         byTty.set(tty, s);
       }
     } else {
@@ -141,11 +150,11 @@ async function loadSessions(): Promise<ParsedSession[]> {
   }
   const merged = [...byTty.values(), ...noTty];
 
-  // Dedupe by cwd: keep the most recently updated session per working directory
+  // Dedupe by cwd: keep the highest-priority session per working directory
   const byCwd = new Map<string, ParsedSession>();
   for (const s of merged) {
     const existing = byCwd.get(s.cwd);
-    if (!existing || s.updatedDate > existing.updatedDate) {
+    if (!existing || shouldReplace(existing, s)) {
       byCwd.set(s.cwd, s);
     }
   }
