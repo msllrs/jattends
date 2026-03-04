@@ -47,8 +47,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         store.startWatching()
 
+        // Force reload on wake from sleep — FSEvents can miss changes during sleep
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.store.forceReload()
+        }
+
+        // UI update timer (icon, notifications)
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.updateIconIfNeeded()
+        }
+
+        // Safety-net periodic reload every 10s to catch missed FSEvents and clean dead PIDs
+        Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+            self?.store.forceReload()
         }
     }
 

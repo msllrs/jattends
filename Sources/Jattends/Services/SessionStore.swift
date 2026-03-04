@@ -52,6 +52,16 @@ final class SessionStore {
         watcher = nil
     }
 
+    /// Force a reload — called on wake from sleep and periodically as a safety net.
+    func forceReload() {
+        reload()
+    }
+
+    /// Check if a process is still running.
+    private func isProcessAlive(_ pid: Int) -> Bool {
+        kill(pid_t(pid), 0) == 0
+    }
+
     private func reload() {
         let fm = FileManager.default
         let dir = Self.sessionsDirectory
@@ -72,10 +82,17 @@ final class SessionStore {
         var loaded: [SessionInfo] = []
         for file in files {
             guard let data = try? Data(contentsOf: file),
-                  let session = try? decoder.decode(SessionInfo.self, from: data),
-                  !session.isStale
+                  let session = try? decoder.decode(SessionInfo.self, from: data)
             else {
-                // Remove stale or unreadable files
+                // Skip unreadable files (may be mid-write) — don't delete
+                continue
+            }
+            if session.isStale {
+                try? fm.removeItem(at: file)
+                continue
+            }
+            // Remove sessions whose terminal process has died
+            if let pid = session.terminalPid, !isProcessAlive(pid) {
                 try? fm.removeItem(at: file)
                 continue
             }
