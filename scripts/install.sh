@@ -5,6 +5,33 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
+# Sync version from VERSION file into Info.plist and Raycast package.json
+VERSION=$(tr -d '[:space:]' < "$PROJECT_DIR/VERSION")
+/usr/bin/python3 -c "
+import plistlib, sys
+path = sys.argv[1] + '/Resources/Info.plist'
+with open(path, 'rb') as f:
+    plist = plistlib.load(f)
+plist['CFBundleShortVersionString'] = sys.argv[2]
+# Bump build number from current value
+plist['CFBundleVersion'] = str(int(plist.get('CFBundleVersion', '0')) + 1)
+with open(path, 'wb') as f:
+    plistlib.dump(plist, f)
+" "$PROJECT_DIR" "$VERSION"
+
+/usr/bin/python3 -c "
+import json, sys
+path = sys.argv[1] + '/raycast-extension/package.json'
+with open(path) as f:
+    pkg = json.load(f)
+pkg['version'] = sys.argv[2]
+with open(path, 'w') as f:
+    json.dump(pkg, f, indent=2)
+    f.write('\n')
+" "$PROJECT_DIR" "$VERSION"
+
+echo "Version: $VERSION"
+
 # Build first
 bash "$SCRIPT_DIR/build.sh"
 

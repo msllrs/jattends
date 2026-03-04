@@ -137,7 +137,7 @@ struct PreferencesView: View {
         .formStyle(.grouped)
         Spacer()
         HStack {
-            Text("Jattends v1.0.0")
+            Text("Jattends v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?")")
             Text("·")
             Link("@msllrs", destination: URL(string: "https://x.com/msllrs")!)
             Text("·")
