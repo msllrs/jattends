@@ -29,7 +29,7 @@ interface ParsedSession extends SessionInfo {
 
 const SESSIONS_DIR = join(homedir(), ".claude", "jattends", "sessions");
 const STALE_MS = 24 * 60 * 60 * 1000; // 24 hours
-const ACTIVE_TIMEOUT_MS = 30 * 1000; // If "active" but not updated in 30s, treat as idle
+const ACTIVE_TIMEOUT_MS = 5 * 60 * 1000; // If "active" but not updated in 5min, treat as idle
 
 const STATUS_ORDER: Record<SessionStatus, number> = {
   waiting: 0,
@@ -37,9 +37,9 @@ const STATUS_ORDER: Record<SessionStatus, number> = {
   idle: 2,
 };
 
-const STATUS_CONFIG: Record<SessionStatus, { label: string; color: Color; icon: Icon }> = {
-  waiting: { label: "Waiting", color: Color.Orange, icon: Icon.CircleFilled },
-  active: { label: "Working", color: Color.Green, icon: Icon.CircleFilled },
+const STATUS_CONFIG: Record<SessionStatus, { label: string; color: string; icon: Icon }> = {
+  waiting: { label: "Waiting", color: "#ff9502", icon: Icon.CircleFilled },
+  active: { label: "Working", color: "#34c759", icon: Icon.CircleFilled },
   idle: { label: "Ready", color: Color.SecondaryText, icon: Icon.CircleFilled },
 };
 
@@ -124,7 +124,8 @@ async function loadSessions(): Promise<ParsedSession[]> {
 
   // Deduplicate:
   // 1. Same TTY → keep only the most recently updated (multiple sessions can't share a TTY)
-  // 2. Subdirectory of another session with same PID → discard the child
+  // 2. Same cwd → keep the most recently updated (e.g. subagent + parent on same project)
+  // 3. Subdirectory of another session with same PID → discard the child
   const byTty = new Map<string, ParsedSession>();
   const noTty: ParsedSession[] = [];
   for (const s of sessions) {
@@ -139,7 +140,18 @@ async function loadSessions(): Promise<ParsedSession[]> {
     }
   }
   const merged = [...byTty.values(), ...noTty];
-  const deduped = merged.filter((s, _, all) => {
+
+  // Dedupe by cwd: keep the most recently updated session per working directory
+  const byCwd = new Map<string, ParsedSession>();
+  for (const s of merged) {
+    const existing = byCwd.get(s.cwd);
+    if (!existing || s.updatedDate > existing.updatedDate) {
+      byCwd.set(s.cwd, s);
+    }
+  }
+  const cwdDeduped = [...byCwd.values()];
+
+  const deduped = cwdDeduped.filter((s, _, all) => {
     if (!s.terminalPid) return true;
     return !all.some(
       (other) =>
