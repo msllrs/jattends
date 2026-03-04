@@ -17,6 +17,7 @@ interface SessionInfo {
   terminalApp?: string;
   terminalPid?: number;
   terminalTty?: string;
+  claudePid?: number;
   updatedAt: string; // ISO 8601
 }
 
@@ -68,6 +69,32 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
+/** Get cwds of all live claude processes */
+function liveClaudeCwds(): Set<string> {
+  const cwds = new Set<string>();
+  try {
+    const psOutput = execFileSync("ps", ["-eo", "pid,comm"], { encoding: "utf-8" });
+    for (const line of psOutput.split("\n")) {
+      const match = line.trim().match(/^(\d+)\s+claude$/);
+      if (!match) continue;
+      const pid = match[1];
+      try {
+        const lsofOut = execFileSync("lsof", ["-a", "-d", "cwd", "-p", pid, "-Fn"], {
+          encoding: "utf-8",
+          timeout: 2000,
+        });
+        const cwdLine = lsofOut.split("\n").find((l) => l.startsWith("n/"));
+        if (cwdLine) cwds.add(cwdLine.slice(1));
+      } catch {
+        continue;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return cwds;
+}
+
 // --- Session loading ---
 
 async function loadSessions(): Promise<ParsedSession[]> {
@@ -79,6 +106,7 @@ async function loadSessions(): Promise<ParsedSession[]> {
   }
 
   const now = Date.now();
+  const liveCwds = liveClaudeCwds();
   const sessions: ParsedSession[] = [];
 
   for (const file of files) {
@@ -99,6 +127,26 @@ async function loadSessions(): Promise<ParsedSession[]> {
 
       // Skip and clean up sessions whose terminal process is dead
       if (raw.terminalPid && !isProcessAlive(raw.terminalPid)) {
+        try {
+          unlinkSync(filePath);
+        } catch {
+          /* ignore */
+        }
+        continue;
+      }
+
+      // Skip and clean up sessions whose Claude process is dead
+      if (raw.claudePid && !isProcessAlive(raw.claudePid)) {
+        try {
+          unlinkSync(filePath);
+        } catch {
+          /* ignore */
+        }
+        continue;
+      }
+
+      // Fallback for sessions without claudePid: check if any claude process owns this cwd
+      if (!raw.claudePid && !liveCwds.has(raw.cwd)) {
         try {
           unlinkSync(filePath);
         } catch {

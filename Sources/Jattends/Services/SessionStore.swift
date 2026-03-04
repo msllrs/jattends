@@ -62,6 +62,38 @@ final class SessionStore {
         kill(pid_t(pid), 0) == 0
     }
 
+    /// Get cwds of all live `claude` processes via ps + lsof.
+    private func liveClaudeCwds() -> Set<String> {
+        var cwds = Set<String>()
+        guard let psOutput = try? runCommand("/bin/ps", ["-eo", "pid,comm"]) else { return cwds }
+        for line in psOutput.split(separator: "\n") {
+            let parts = line.split(separator: " ", maxSplits: 1)
+            guard parts.count == 2, parts[1].trimmingCharacters(in: .whitespaces) == "claude",
+                  let pid = Int(parts[0].trimmingCharacters(in: .whitespaces)) else { continue }
+            if let lsofOutput = try? runCommand("/usr/sbin/lsof", ["-a", "-d", "cwd", "-p", String(pid), "-Fn"]) {
+                for lsofLine in lsofOutput.split(separator: "\n") {
+                    if lsofLine.hasPrefix("n/") {
+                        cwds.insert(String(lsofLine.dropFirst(1)))
+                        break
+                    }
+                }
+            }
+        }
+        return cwds
+    }
+
+    private func runCommand(_ path: String, _ args: [String]) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = args
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    }
+
     private func reload() {
         let fm = FileManager.default
         let dir = Self.sessionsDirectory
@@ -79,6 +111,9 @@ final class SessionStore {
         let autoClearMinutes = UserDefaults.standard.integer(forKey: "autoClearMinutes")
         let autoClearInterval: TimeInterval? = autoClearMinutes > 0 ? TimeInterval(autoClearMinutes * 60) : nil
 
+        // Build set of cwds with live claude processes (for legacy sessions without claudePid)
+        let liveCwds = liveClaudeCwds()
+
         var loaded: [SessionInfo] = []
         for file in files {
             guard let data = try? Data(contentsOf: file),
@@ -93,6 +128,16 @@ final class SessionStore {
             }
             // Remove sessions whose terminal process has died
             if let pid = session.terminalPid, !isProcessAlive(pid) {
+                try? fm.removeItem(at: file)
+                continue
+            }
+            // Remove sessions whose Claude process has died
+            if let pid = session.claudePid, !isProcessAlive(pid) {
+                try? fm.removeItem(at: file)
+                continue
+            }
+            // Fallback for sessions without claudePid: check if any claude process owns this cwd
+            if session.claudePid == nil, !liveCwds.contains(session.cwd) {
                 try? fm.removeItem(at: file)
                 continue
             }

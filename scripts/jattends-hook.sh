@@ -13,6 +13,25 @@ mkdir -p "$SESSIONS_DIR"
 
 # --- Shared helpers ---
 
+# Walk up the process tree from $$ to find the claude process PID
+find_claude_pid() {
+    local pid="$$"
+    local max_depth=5
+    local depth=0
+    while [ "$pid" -ne 1 ] && [ "$depth" -lt "$max_depth" ]; do
+        local pname
+        pname=$(ps -o comm= -p "$pid" 2>/dev/null | xargs basename 2>/dev/null || echo "")
+        if [ "$pname" = "claude" ]; then
+            echo "$pid"
+            return
+        fi
+        pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+        [ -z "$pid" ] && break
+        depth=$((depth + 1))
+    done
+    echo ""
+}
+
 # Walk up the process tree to find the terminal process PID
 find_terminal_pid() {
     local pid="$1"
@@ -56,7 +75,7 @@ find_terminal_app() {
 }
 
 write_session_file() {
-    local session_id="$1" cwd="$2" status="$3" term_app="$4" term_pid="$5" term_tty="$6"
+    local session_id="$1" cwd="$2" status="$3" term_app="$4" term_pid="$5" term_tty="$6" claude_pid="$7"
     local session_file="${SESSIONS_DIR}/${session_id}.json"
     local now
     now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -69,10 +88,11 @@ data = {
     'terminalApp': sys.argv[4],
     'terminalPid': int(sys.argv[5]) if sys.argv[5] else None,
     'terminalTty': sys.argv[6] if sys.argv[6] else None,
-    'updatedAt': sys.argv[7]
+    'claudePid': int(sys.argv[7]) if sys.argv[7] else None,
+    'updatedAt': sys.argv[8]
 }
 print(json.dumps(data))
-" "$session_id" "$cwd" "$status" "$term_app" "${term_pid:-}" "${term_tty:-}" "$now" > "${session_file}.tmp" \
+" "$session_id" "$cwd" "$status" "$term_app" "${term_pid:-}" "${term_tty:-}" "${claude_pid:-}" "$now" > "${session_file}.tmp" \
     && mv -f "${session_file}.tmp" "$session_file"
 }
 
@@ -129,7 +149,7 @@ print(d.get('terminalTty',''), d.get('cwd',''))
 
         # Only create if no file exists yet for this discovered session
         if [ ! -f "${SESSIONS_DIR}/${local_session_id}.json" ]; then
-            write_session_file "$local_session_id" "$local_cwd" "idle" "$local_term_app" "${local_term_pid:-}" "${local_tty:-}"
+            write_session_file "$local_session_id" "$local_cwd" "idle" "$local_term_app" "${local_term_pid:-}" "${local_tty:-}" "$cpid"
         fi
     done
 
@@ -149,9 +169,10 @@ SESSION_FILE="${SESSIONS_DIR}/${SESSION_ID}.json"
 TERM_APP="${TERM_PROGRAM:-unknown}"
 TERMINAL_PID=$(find_terminal_pid $$)
 TERMINAL_TTY=$(tty 2>/dev/null || echo "")
+CLAUDE_PID=$(find_claude_pid)
 
 write_session() {
-    write_session_file "$SESSION_ID" "$CWD" "$1" "$TERM_APP" "${TERMINAL_PID:-}" "${TERMINAL_TTY:-}"
+    write_session_file "$SESSION_ID" "$CWD" "$1" "$TERM_APP" "${TERMINAL_PID:-}" "${TERMINAL_TTY:-}" "${CLAUDE_PID:-}"
 }
 
 case "$EVENT" in

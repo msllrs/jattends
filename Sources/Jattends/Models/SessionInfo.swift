@@ -7,6 +7,7 @@ struct SessionInfo: Codable, Identifiable {
     let terminalApp: String?
     let terminalPid: Int?
     let terminalTty: String?
+    let claudePid: Int?
     let updatedAt: Date
 
     var id: String { sessionId }

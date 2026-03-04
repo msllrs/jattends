@@ -143,6 +143,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
                     terminalApp: terminalApp,
                     terminalPid: terminalPid != 0 ? terminalPid : nil,
                     terminalTty: terminalTty,
+                    claudePid: nil,
                     updatedAt: Date()
                 )
                 DispatchQueue.main.async { [weak self] in
