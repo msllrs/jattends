@@ -439,8 +439,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func sessionClicked(_ sender: NSMenuItem) {
         guard let session = sender.representedObject as? SessionInfo else { return }
-        // Delay slightly so the menu fully dismisses before we raise the terminal window
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+        // Next runloop pass: the menu window is already gone (dismissed
+        // without animation), this just lets its teardown flush first
+        DispatchQueue.main.async {
             TerminalActivator.activate(session: session)
         }
     }
@@ -571,7 +572,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let request = sender.representedObject as? ApprovalRequest,
               let session = store.sessions.first(where: { $0.sessionId == request.sessionId })
         else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+        DispatchQueue.main.async {
             TerminalActivator.activate(session: session)
         }
     }

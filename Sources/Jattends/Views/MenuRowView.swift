@@ -165,7 +165,10 @@ final class MenuRowView: NSView {
         guard let item = enclosingMenuItem, item.isEnabled else { return }
         mouseInside = false
         needsDisplay = true
-        item.menu?.cancelTracking()
+        // Without animation: the action blocks the main thread with window
+        // activation work, which would freeze a fade-out into a lingering
+        // ghost of the menu
+        item.menu?.cancelTrackingWithoutAnimation()
         if let action = item.action {
             NSApp.sendAction(action, to: item.target, from: item)
         }
