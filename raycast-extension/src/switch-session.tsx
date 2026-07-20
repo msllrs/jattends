@@ -106,7 +106,7 @@ async function loadSessions(): Promise<ParsedSession[]> {
   }
 
   const now = Date.now();
-  const liveCwds = liveClaudeCwds();
+  let liveCwds: Set<string> | null = null; // lazy — only computed if needed
   const sessions: ParsedSession[] = [];
 
   for (const file of files) {
@@ -146,7 +146,7 @@ async function loadSessions(): Promise<ParsedSession[]> {
       }
 
       // Fallback for sessions without claudePid: check if any claude process owns this cwd
-      if (!raw.claudePid && !liveCwds.has(raw.cwd)) {
+      if (!raw.claudePid && !(liveCwds ??= liveClaudeCwds()).has(raw.cwd)) {
         try {
           unlinkSync(filePath);
         } catch {
@@ -180,12 +180,28 @@ async function loadSessions(): Promise<ParsedSession[]> {
   }
 
   // Deduplicate:
+  // 0. Same claudePid → keep highest-priority status (session reconnects create dupes)
   // 1. Same TTY → keep highest-priority status (multiple sessions can't share a TTY)
   // 2. Same cwd → keep highest-priority status (e.g. real session over discovered)
   // 3. Subdirectory of another session with same PID → discard the child
+  const byClaudePid = new Map<string, ParsedSession>();
+  const noClaudePid: ParsedSession[] = [];
+  for (const s of sessions) {
+    if (s.claudePid) {
+      const key = String(s.claudePid);
+      const existing = byClaudePid.get(key);
+      if (!existing || shouldReplace(existing, s)) {
+        byClaudePid.set(key, s);
+      }
+    } else {
+      noClaudePid.push(s);
+    }
+  }
+  const pidDeduped = [...byClaudePid.values(), ...noClaudePid];
+
   const byTty = new Map<string, ParsedSession>();
   const noTty: ParsedSession[] = [];
-  for (const s of sessions) {
+  for (const s of pidDeduped) {
     const tty = s.terminalTty && s.terminalTty !== "not a tty" ? s.terminalTty : null;
     if (tty) {
       const existing = byTty.get(tty);
