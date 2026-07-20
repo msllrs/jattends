@@ -45,9 +45,7 @@ enum SessionStatus: String, Codable, Comparable, CaseIterable {
 
     var iconColor: String {
         switch self {
-        case .approval: return "red"
-        case .waiting: return "orange"
-        case .error: return "red"
+        case .approval, .waiting, .error: return "orange"
         case .working: return "green"
         case .compacting: return "blue"
         case .idle: return "gray"

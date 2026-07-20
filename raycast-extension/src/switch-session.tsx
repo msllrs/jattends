@@ -47,9 +47,9 @@ const STATUS_ORDER: Record<SessionStatus, number> = {
 };
 
 const STATUS_CONFIG: Record<SessionStatus, { label: string; color: string; icon: Icon }> = {
-  approval: { label: "Needs Approval", color: "#ff3b30", icon: Icon.ExclamationMark },
+  approval: { label: "Needs Approval", color: "#ff9502", icon: Icon.ExclamationMark },
   waiting: { label: "Waiting", color: "#ff9502", icon: Icon.CircleFilled },
-  error: { label: "Error", color: "#ff3b30", icon: Icon.XMarkCircle },
+  error: { label: "Error", color: "#ff9502", icon: Icon.XMarkCircle },
   working: { label: "Working", color: "#34c759", icon: Icon.CircleFilled },
   compacting: { label: "Compacting", color: "#007aff", icon: Icon.CircleProgress50 },
   idle: { label: "Ready", color: Color.SecondaryText, icon: Icon.CircleFilled },

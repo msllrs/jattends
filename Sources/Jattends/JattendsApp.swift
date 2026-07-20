@@ -213,10 +213,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Animated badge dot (CALayer on the status button)
 
     private static func dotColor(for urgency: BadgeDotModel.Urgency) -> NSColor {
-        switch urgency {
-        case .urgent: return .systemRed
-        case .normal: return Self.statusColors[.waiting] ?? .systemOrange
-        }
+        // One attention color for now; the urgency split stays in the model
+        // in case a distinct urgent tint returns
+        Self.attentionColor
     }
 
     private func showDot(color: NSColor) {
@@ -470,10 +469,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// The one attention color — approval/error/waiting all use it.
+    static let attentionColor = NSColor(red: 0xd7/255, green: 0x77/255, blue: 0x57/255, alpha: 1)
+
     private static let statusColors: [SessionStatus: NSColor] = [
-        .approval: .systemRed,
-        .waiting: NSColor(red: 0xd7/255, green: 0x77/255, blue: 0x57/255, alpha: 1),
-        .error: .systemRed,
+        .approval: attentionColor,
+        .waiting: attentionColor,
+        .error: attentionColor,
         .working: .systemGreen,
         .compacting: .systemBlue,
         .idle: .tertiaryLabelColor,
@@ -551,7 +553,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func makeApprovalTitle(for request: ApprovalRequest) -> NSAttributedString {
         Self.makeMenuItemTitle(
             symbol: "✱",
-            color: .systemRed,
+            color: Self.attentionColor,
             title: request.projectName,
             detail: request.summary
         )
