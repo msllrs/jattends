@@ -36,5 +36,5 @@
     "prepublishOnly": "echo \"Error: no publish\" && exit 1",
     "publish": "npx @raycast/api@latest publish"
   },
-  "version": "1.1.0"
+  "version": "1.2.0"
 }
