@@ -3,7 +3,7 @@
 set -euo pipefail
 
 APP="/Applications/Jattends.app"
-HOOK="${HOME}/.claude/hooks/jattends-hook.sh"
+HOOKS=("${HOME}/.claude/hooks/jattends-hook.py" "${HOME}/.claude/hooks/jattends-hook.sh")
 SESSIONS="${HOME}/.claude/jattends"
 SETTINGS="${HOME}/.claude/settings.json"
 
@@ -18,11 +18,13 @@ if [ -d "$APP" ]; then
     echo "Removed: $APP"
 fi
 
-# Remove hook script
-if [ -f "$HOOK" ]; then
-    rm -f "$HOOK"
-    echo "Removed: $HOOK"
-fi
+# Remove hook scripts (current and legacy)
+for hook in "${HOOKS[@]}"; do
+    if [ -f "$hook" ]; then
+        rm -f "$hook"
+        echo "Removed: $hook"
+    fi
+done
 
 # Remove session data
 if [ -d "$SESSIONS" ]; then
@@ -37,7 +39,6 @@ if [ -f "$SETTINGS" ]; then
 import json, os
 
 settings_path = os.path.expanduser("~/.claude/settings.json")
-hook_cmd = "~/.claude/hooks/jattends-hook.sh"
 
 if not os.path.exists(settings_path):
     exit(0)
@@ -52,9 +53,9 @@ for event in list(hooks.keys()):
     matchers = hooks[event]
     filtered = []
     for matcher in matchers:
-        # Remove matchers that only contain our hook
+        # Remove matchers that only contain our hook (any jattends-hook variant)
         hook_list = matcher.get("hooks", [])
-        remaining = [h for h in hook_list if h.get("command") != hook_cmd]
+        remaining = [h for h in hook_list if "jattends-hook" not in h.get("command", "")]
         if remaining:
             matcher["hooks"] = remaining
             filtered.append(matcher)

@@ -37,8 +37,9 @@ bash "$SCRIPT_DIR/build.sh"
 
 APP_SRC="${PROJECT_DIR}/.build/Jattends.app"
 APP_DST="/Applications/Jattends.app"
-HOOK_SRC="${SCRIPT_DIR}/jattends-hook.sh"
-HOOK_DST="${HOME}/.claude/hooks/jattends-hook.sh"
+HOOK_SRC="${SCRIPT_DIR}/jattends-hook.py"
+HOOK_DST="${HOME}/.claude/hooks/jattends-hook.py"
+OLD_HOOK_DST="${HOME}/.claude/hooks/jattends-hook.sh"
 SETTINGS_FILE="${HOME}/.claude/settings.json"
 
 # Track whether this is a fresh install
@@ -71,10 +72,11 @@ echo "Installing hook script..."
 mkdir -p "$(dirname "$HOOK_DST")"
 cp "$HOOK_SRC" "$HOOK_DST"
 chmod +x "$HOOK_DST"
+rm -f "$OLD_HOOK_DST"
 echo "Installed: $HOOK_DST"
 
-# Create sessions directory
-mkdir -p "${HOME}/.claude/jattends/sessions"
+# Create sessions and approvals directories
+mkdir -p "${HOME}/.claude/jattends/sessions" "${HOME}/.claude/jattends/approvals"
 
 # Configure hooks in settings.json
 echo ""
@@ -83,7 +85,7 @@ echo "Configuring Claude Code hooks..."
 import json, os, sys
 
 settings_path = os.path.expanduser("~/.claude/settings.json")
-hook_cmd = "~/.claude/hooks/jattends-hook.sh"
+hook_cmd = "~/.claude/hooks/jattends-hook.py"
 
 # Load existing settings or start fresh
 if os.path.exists(settings_path):
@@ -94,33 +96,51 @@ else:
 
 hooks = settings.setdefault("hooks", {})
 
-# Hook events to register (all synchronous — the script is fast enough
-# and synchronous hooks don't produce "Async hook completed" messages)
-hook_events = [
-    "Notification",
-    "PermissionRequest",
-    "Stop",
-    "UserPromptSubmit",
-    "SessionStart",
-    "SessionEnd",
-]
+# Per-event timeouts: everything is a fast local write except
+# PermissionRequest, which may block awaiting an in-app decision.
+hook_events = {
+    "SessionStart": 10,
+    "SessionEnd": 10,
+    "UserPromptSubmit": 10,
+    "PostToolUse": 10,
+    "Notification": 10,
+    "Stop": 10,
+    "StopFailure": 10,
+    "PreCompact": 10,
+    "PostCompact": 10,
+    "PermissionRequest": 90,
+}
+
+def is_jattends(h):
+    return "jattends-hook" in h.get("command", "")
 
 changed = False
-for event in hook_events:
-    matchers = hooks.setdefault(event, [])
-
-    # Check if our hook command is already present in any matcher
-    already_present = False
+# Drop registrations for events we no longer use (and old .sh entries)
+for event in list(hooks.keys()):
+    matchers = hooks[event]
     for matcher in matchers:
-        for h in matcher.get("hooks", []):
-            if h.get("command") == hook_cmd:
-                already_present = True
-                break
-        if already_present:
-            break
+        entries = matcher.get("hooks", [])
+        stale = [h for h in entries if is_jattends(h) and (
+            event not in hook_events
+            or h.get("command") != hook_cmd
+            or h.get("timeout") != hook_events[event])]
+        if stale:
+            matcher["hooks"] = [h for h in entries if h not in stale]
+            changed = True
+    pruned = [m for m in matchers if m.get("hooks") or m.get("matcher")]
+    if pruned != matchers:
+        hooks[event] = pruned
+        changed = True
+    if not hooks[event]:
+        del hooks[event]
+        changed = True
 
-    if not already_present:
-        matchers.append({"hooks": [{"type": "command", "command": hook_cmd}]})
+for event, timeout in hook_events.items():
+    matchers = hooks.setdefault(event, [])
+    already = any(is_jattends(h) for m in matchers for h in m.get("hooks", []))
+    if not already:
+        matchers.append({"hooks": [{"type": "command", "command": hook_cmd,
+                                    "timeout": timeout}]})
         changed = True
 
 if changed:

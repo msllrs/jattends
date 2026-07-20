@@ -8,7 +8,7 @@ import { join, basename } from "node:path";
 
 // --- Types ---
 
-type SessionStatus = "waiting" | "active" | "idle";
+type SessionStatus = "approval" | "waiting" | "error" | "working" | "compacting" | "idle";
 
 interface SessionInfo {
   sessionId: string;
@@ -19,6 +19,10 @@ interface SessionInfo {
   terminalTty?: string;
   claudePid?: number;
   updatedAt: string; // ISO 8601
+  statusDetail?: string;
+  lastPrompt?: string;
+  permissionMode?: string;
+  transcriptPath?: string;
 }
 
 interface ParsedSession extends SessionInfo {
@@ -30,19 +34,31 @@ interface ParsedSession extends SessionInfo {
 
 const SESSIONS_DIR = join(homedir(), ".claude", "jattends", "sessions");
 const STALE_MS = 24 * 60 * 60 * 1000; // 24 hours
-const ACTIVE_TIMEOUT_MS = 5 * 60 * 1000; // If "active" but not updated in 5min, treat as idle
+const WORKING_TIMEOUT_MS = 5 * 60 * 1000; // If "working" but not updated in 5min, treat as idle
 
 const STATUS_ORDER: Record<SessionStatus, number> = {
-  waiting: 0,
-  active: 1,
-  idle: 2,
+  approval: 0,
+  waiting: 1,
+  error: 2,
+  working: 3,
+  compacting: 4,
+  idle: 5,
 };
 
 const STATUS_CONFIG: Record<SessionStatus, { label: string; color: string; icon: Icon }> = {
+  approval: { label: "Needs Approval", color: "#ff3b30", icon: Icon.ExclamationMark },
   waiting: { label: "Waiting", color: "#ff9502", icon: Icon.CircleFilled },
-  active: { label: "Working", color: "#34c759", icon: Icon.CircleFilled },
+  error: { label: "Error", color: "#ff3b30", icon: Icon.XMarkCircle },
+  working: { label: "Working", color: "#34c759", icon: Icon.CircleFilled },
+  compacting: { label: "Compacting", color: "#007aff", icon: Icon.CircleProgress50 },
   idle: { label: "Ready", color: Color.SecondaryText, icon: Icon.CircleFilled },
 };
+
+/** Normalize legacy hook status values ("active" from pre-1.2 hooks). */
+function normalizeStatus(raw: string): SessionStatus {
+  if (raw === "active") return "working";
+  return raw in STATUS_ORDER ? (raw as SessionStatus) : "idle";
+}
 
 const APP_NAME_MAP: Record<string, string> = {
   ghostty: "Ghostty",
@@ -155,9 +171,12 @@ async function loadSessions(): Promise<ParsedSession[]> {
         continue;
       }
 
-      // If "active" but not updated recently, Claude likely finished — show as idle
+      // If working/compacting but not updated recently, Claude likely finished — show as idle
+      const normalized = normalizeStatus(raw.status);
       const effectiveStatus: SessionStatus =
-        raw.status === "active" && now - updatedDate.getTime() > ACTIVE_TIMEOUT_MS ? "idle" : raw.status;
+        (normalized === "working" || normalized === "compacting") && now - updatedDate.getTime() > WORKING_TIMEOUT_MS
+          ? "idle"
+          : normalized;
 
       sessions.push({
         ...raw,
@@ -365,8 +384,11 @@ export default function SwitchSession() {
   const { data: sessions, isLoading } = usePromise(loadSessions);
 
   const grouped: Record<SessionStatus, ParsedSession[]> = {
+    approval: [],
     waiting: [],
-    active: [],
+    error: [],
+    working: [],
+    compacting: [],
     idle: [],
   };
 
@@ -375,7 +397,7 @@ export default function SwitchSession() {
   }
 
   const sections: { status: SessionStatus; items: ParsedSession[] }[] = (
-    ["waiting", "active", "idle"] as SessionStatus[]
+    ["approval", "waiting", "error", "working", "compacting", "idle"] as SessionStatus[]
   )
     .filter((status) => grouped[status].length > 0)
     .map((status) => ({ status, items: grouped[status] }));
@@ -390,8 +412,8 @@ export default function SwitchSession() {
               <List.Item
                 key={session.sessionId}
                 title={session.projectName}
-                subtitle={session.cwd}
-                keywords={[session.sessionId, session.cwd, session.projectName]}
+                subtitle={session.statusDetail ?? session.lastPrompt ?? session.cwd}
+                keywords={[session.sessionId, session.cwd, session.projectName, session.lastPrompt ?? ""]}
                 icon={{ source: config.icon, tintColor: config.color }}
                 accessories={[{ tag: { value: config.label, color: config.color } }]}
                 actions={
