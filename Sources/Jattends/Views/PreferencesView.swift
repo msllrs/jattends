@@ -48,10 +48,10 @@ struct PreferencesView: View {
                             NotificationManager.shared.requestPermission()
                         }
                     }
-                Toggle("Session needs attention", isOn: $notifyAttention)
-                    .disabled(!notificationsEnabled)
-                Toggle("Approval requests", isOn: $notifyApprovals)
-                    .disabled(!notificationsEnabled)
+                if notificationsEnabled {
+                    Toggle("Session needs attention", isOn: $notifyAttention)
+                    Toggle("Approval requests", isOn: $notifyApprovals)
+                }
             } header: {
                 Text("Notifications")
             } footer: {
@@ -68,15 +68,16 @@ struct PreferencesView: View {
                         HookConfig.sync()
                     }
 
-                Picker("Wait for a decision", selection: $approvalWaitSeconds) {
-                    Text("15 seconds").tag(15.0)
-                    Text("30 seconds").tag(30.0)
-                    Text("45 seconds").tag(45.0)
-                    Text("60 seconds").tag(60.0)
-                }
-                .disabled(!inAppApprovals)
-                .onChange(of: approvalWaitSeconds) { _, _ in
-                    HookConfig.sync()
+                if inAppApprovals {
+                    Picker("Wait for a decision", selection: $approvalWaitSeconds) {
+                        Text("15 seconds").tag(15.0)
+                        Text("30 seconds").tag(30.0)
+                        Text("45 seconds").tag(45.0)
+                        Text("60 seconds").tag(60.0)
+                    }
+                    .onChange(of: approvalWaitSeconds) { _, _ in
+                        HookConfig.sync()
+                    }
                 }
             } header: {
                 Text("Approvals")
