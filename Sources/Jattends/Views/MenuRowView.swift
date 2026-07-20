@@ -6,6 +6,7 @@ import AppKit
 /// item's action, and shows a chevron for rows with submenus.
 final class MenuRowView: NSView {
     private let text: NSAttributedString
+    private let textSize: NSSize
     private let showsChevron: Bool
     private let trailing: NSAttributedString?
     private var mouseInside = false
@@ -35,14 +36,15 @@ final class MenuRowView: NSView {
             ])
         }
         let textWidth = Self.rowWidth - Self.contentInsetX * 2 - (showsChevron ? 14 : 0)
-        let textHeight = text.boundingRect(
+        let measured = text.boundingRect(
             with: NSSize(width: textWidth, height: .greatestFiniteMagnitude),
             options: [.usesLineFragmentOrigin]
-        ).height
+        ).size
+        self.textSize = NSSize(width: ceil(measured.width), height: ceil(measured.height))
         super.init(frame: NSRect(
             x: 0, y: 0,
             width: Self.rowWidth,
-            height: ceil(textHeight) + Self.verticalPadding * 2
+            height: textSize.height + Self.verticalPadding * 2
         ))
     }
 
@@ -60,11 +62,15 @@ final class MenuRowView: NSView {
             NSBezierPath(roundedRect: highlightRect, xRadius: 5, yRadius: 5).fill()
         }
 
+        // Center on the measured text height — the menu may stretch short
+        // rows to its minimum row height, and string drawing is top-anchored
         let textWidth = bounds.width - Self.contentInsetX * 2 - (showsChevron ? 14 : 0)
         text.draw(
             in: NSRect(
-                x: Self.contentInsetX, y: Self.verticalPadding,
-                width: textWidth, height: bounds.height - Self.verticalPadding * 2
+                x: Self.contentInsetX,
+                y: (bounds.height - textSize.height) / 2,
+                width: textWidth,
+                height: textSize.height
             )
         )
 
