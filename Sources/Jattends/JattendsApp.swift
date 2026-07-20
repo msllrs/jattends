@@ -391,7 +391,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     ]
 
     private func makeAttributedTitle(for session: SessionInfo) -> NSAttributedString {
-        let detail = session.statusDetail ?? (session.status.needsAttention ? session.status.label : nil)
+        var detail = session.statusDetail ?? (session.status.needsAttention ? session.status.label : nil)
+        if let count = session.subagentCount, count > 0 {
+            let agents = "\(count) agent\(count == 1 ? "" : "s")"
+            detail = detail.map { "⑂ \(agents) · \($0)" } ?? "⑂ Running \(agents)"
+        }
         return Self.makeMenuItemTitle(
             symbol: Self.statusSymbols[session.status] ?? "○",
             color: Self.statusColors[session.status] ?? .secondaryLabelColor,

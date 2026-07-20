@@ -13,6 +13,7 @@ struct SessionInfo: Codable, Identifiable {
     let lastPrompt: String?
     let permissionMode: String?
     let transcriptPath: String?
+    let subagentCount: Int?
 
     init(
         sessionId: String,
@@ -26,7 +27,8 @@ struct SessionInfo: Codable, Identifiable {
         statusDetail: String? = nil,
         lastPrompt: String? = nil,
         permissionMode: String? = nil,
-        transcriptPath: String? = nil
+        transcriptPath: String? = nil,
+        subagentCount: Int? = nil
     ) {
         self.sessionId = sessionId
         self.cwd = cwd
@@ -40,6 +42,7 @@ struct SessionInfo: Codable, Identifiable {
         self.lastPrompt = lastPrompt
         self.permissionMode = permissionMode
         self.transcriptPath = transcriptPath
+        self.subagentCount = subagentCount
     }
 
     var id: String { sessionId }

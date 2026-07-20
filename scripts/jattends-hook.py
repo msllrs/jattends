@@ -21,6 +21,7 @@ BASE_DIR = os.path.expanduser("~/.claude/jattends")
 SESSIONS_DIR = os.path.join(BASE_DIR, "sessions")
 APPROVALS_DIR = os.path.join(BASE_DIR, "approvals")
 DISMISSED_DIR = os.path.join(BASE_DIR, "dismissed")
+SUBAGENTS_DIR = os.path.join(BASE_DIR, "subagents")
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
 TERMINALS = {"ghostty", "Terminal", "iTerm2", "kitty", "warp", "stable",
@@ -127,6 +128,70 @@ def truncate_prompt(prompt):
     return first_line[:120] if first_line else None
 
 
+# --- Subagent markers ---
+# One file per running subagent (subagents/<session_id>/<agent_id>): parallel
+# starts never race a shared counter, and the count is just a readdir.
+
+def subagent_marker_dir(session_id):
+    return os.path.join(SUBAGENTS_DIR, session_id)
+
+
+def count_subagents(session_id):
+    try:
+        return len(os.listdir(subagent_marker_dir(session_id)))
+    except FileNotFoundError:
+        return 0
+
+
+def track_subagent(event, session_id, agent_id):
+    """Touch/remove the marker for one subagent; returns the running count."""
+    marker_dir = subagent_marker_dir(session_id)
+    safe_id = "".join(c if c.isalnum() or c in "-_." else "_" for c in str(agent_id))
+    path = os.path.join(marker_dir, safe_id)
+    if event == "SubagentStart":
+        os.makedirs(marker_dir, exist_ok=True)
+        open(path, "w").close()
+    else:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+    return count_subagents(session_id)
+
+
+def clear_subagents(session_id):
+    marker_dir = subagent_marker_dir(session_id)
+    try:
+        for name in os.listdir(marker_dir):
+            try:
+                os.remove(os.path.join(marker_dir, name))
+            except FileNotFoundError:
+                pass
+        os.rmdir(marker_dir)
+    except (FileNotFoundError, OSError):
+        pass
+
+
+def prune_subagents():
+    """Drop marker dirs for sessions that no longer exist, and markers
+    older than 12h (a crashed subagent never fires SubagentStop)."""
+    if not os.path.isdir(SUBAGENTS_DIR):
+        return
+    now = time.time()
+    for session_id in os.listdir(SUBAGENTS_DIR):
+        if not os.path.exists(os.path.join(SESSIONS_DIR, session_id + ".json")):
+            clear_subagents(session_id)
+            continue
+        marker_dir = subagent_marker_dir(session_id)
+        for name in os.listdir(marker_dir):
+            path = os.path.join(marker_dir, name)
+            try:
+                if now - os.path.getmtime(path) > 43200:
+                    os.remove(path)
+            except OSError:
+                continue
+
+
 # --- Dismissal tombstones ---
 # The app writes these when the user dismisses a session ("hide until next
 # activity"). Scan mode won't resurrect a tombstoned process; any real hook
@@ -191,6 +256,7 @@ def scan():
 
     procs = process_table()
     prune_tombstones(procs)
+    prune_subagents()
     for pid, (_, ptty, name) in procs.items():
         if name != "claude":
             continue
@@ -294,6 +360,7 @@ def handle_event():
         except (OSError, ValueError):
             pass
         clear_tombstones(session_id, claude_pid)
+        clear_subagents(session_id)
         try:
             os.remove(session_file)
         except FileNotFoundError:
@@ -379,6 +446,12 @@ def handle_event():
     elif event == "PostCompact":
         status = "working"
         detail = None
+    elif event in ("SubagentStart", "SubagentStop"):
+        agent_id = d.get("agent_id")
+        if not agent_id:
+            return  # can't pair start/stop without an id; don't drift
+        track_subagent(event, session_id, agent_id)
+        status = "working"
     else:
         return
 
@@ -389,6 +462,7 @@ def handle_event():
         "statusDetail": detail,
         "permissionMode": d.get("permission_mode", session.get("permissionMode")),
         "transcriptPath": d.get("transcript_path", session.get("transcriptPath")),
+        "subagentCount": count_subagents(session_id),
         "updatedAt": utcnow(),
     })
     atomic_write(session_file, session)

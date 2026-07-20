@@ -23,6 +23,7 @@ interface SessionInfo {
   lastPrompt?: string;
   permissionMode?: string;
   transcriptPath?: string;
+  subagentCount?: number;
 }
 
 interface ParsedSession extends SessionInfo {
@@ -415,7 +416,10 @@ export default function SwitchSession() {
                 subtitle={session.statusDetail ?? session.lastPrompt ?? session.cwd}
                 keywords={[session.sessionId, session.cwd, session.projectName, session.lastPrompt ?? ""]}
                 icon={{ source: config.icon, tintColor: config.color }}
-                accessories={[{ tag: { value: config.label, color: config.color } }]}
+                accessories={[
+                  ...(session.subagentCount ? [{ tag: `⑂ ${session.subagentCount}` }] : []),
+                  { tag: { value: config.label, color: config.color } },
+                ]}
                 actions={
                   <ActionPanel>
                     <Action title="Switch to Session" onAction={() => activateSession(session)} />

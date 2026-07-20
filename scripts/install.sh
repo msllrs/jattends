@@ -108,6 +108,8 @@ hook_events = {
     "StopFailure": 10,
     "PreCompact": 10,
     "PostCompact": 10,
+    "SubagentStart": 10,
+    "SubagentStop": 10,
     "PermissionRequest": 90,
 }
 

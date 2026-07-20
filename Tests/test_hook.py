@@ -203,6 +203,43 @@ class DismissalTombstoneTests(HookTestCase):
         self.assertFalse(hook.is_dismissed(999999999))
 
 
+class SubagentTrackingTests(HookTestCase):
+    def subagent_dir(self, session_id="s1"):
+        return os.path.join(self.home, ".claude", "jattends", "subagents", session_id)
+
+    def test_start_and_stop_update_count(self):
+        self.fire("SubagentStart", agent_id="a1", agent_type="Explore")
+        self.fire("SubagentStart", agent_id="a2", agent_type="general-purpose")
+        s = self.read_session()
+        self.assertEqual(s["subagentCount"], 2)
+        self.assertEqual(s["status"], "working")
+        self.fire("SubagentStop", agent_id="a1", agent_type="Explore")
+        self.assertEqual(self.read_session()["subagentCount"], 1)
+        self.fire("SubagentStop", agent_id="a2", agent_type="general-purpose")
+        self.assertEqual(self.read_session()["subagentCount"], 0)
+
+    def test_duplicate_start_counts_once(self):
+        self.fire("SubagentStart", agent_id="a1")
+        self.fire("SubagentStart", agent_id="a1")
+        self.assertEqual(self.read_session()["subagentCount"], 1)
+
+    def test_missing_agent_id_is_ignored(self):
+        r = self.fire("SubagentStart")
+        self.assertEqual(r.returncode, 0)
+        self.assertFalse(os.path.exists(os.path.join(self.sessions, "s1.json")))
+
+    def test_count_carried_on_other_events(self):
+        self.fire("SubagentStart", agent_id="a1")
+        self.fire("PostToolUse", tool_name="Read", tool_input={"file_path": "/x.txt"})
+        self.assertEqual(self.read_session()["subagentCount"], 1)
+
+    def test_session_end_clears_markers(self):
+        self.fire("SubagentStart", agent_id="a1")
+        self.assertTrue(os.path.isdir(self.subagent_dir()))
+        self.fire("SessionEnd", reason="exit")
+        self.assertFalse(os.path.exists(self.subagent_dir()))
+
+
 class FakeJattends:
     """Make the hook believe the Jattends app is (or isn't) running,
     independent of whether the real app runs on this machine."""

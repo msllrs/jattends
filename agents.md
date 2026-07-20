@@ -134,6 +134,7 @@ Reader conventions both implementations follow:
 | `Stop` | `idle`; `waiting` if message ends with `?` | The `?` check is a fallback for questions Claude asks without a Notification |
 | `StopFailure` | `error` | Detail carries the error type (rate_limit, ...) |
 | `PreCompact` / `PostCompact` | `compacting` / `working` | |
+| `SubagentStart` / `SubagentStop` | `working` | Marker file per running subagent in `~/.claude/jattends/subagents/<session>/<agent_id>`; count written to the session file as `subagentCount`. Skipped if no `agent_id`. SessionEnd clears markers; scan prunes orphaned/12h-stale ones |
 | `SessionEnd` | *(deleted)* | Session file removed |
 
 Registered in `~/.claude/settings.json` by `install.sh` with a 10s timeout per event (90s for `PermissionRequest`).
