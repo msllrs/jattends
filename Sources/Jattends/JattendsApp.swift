@@ -533,6 +533,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ]))
         result.append(NSAttributedString(string: title, attributes: [
             .font: NSFont.menuFont(ofSize: 13),
+            .foregroundColor: NSColor.labelColor, // explicit — unset draws black, invisible in dark mode
             .paragraphStyle: style,
         ]))
 
