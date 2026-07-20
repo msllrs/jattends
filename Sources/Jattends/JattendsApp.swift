@@ -14,7 +14,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let store = SessionStore()
     private let approvalStore = ApprovalStore()
-    private var lastHasWaiting = false
+    private var dotUrgency: BadgeDotModel.Urgency?
     private var dotLayer: CALayer?
     private var dotGeneration = 0
 
@@ -111,23 +111,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateIconIfNeeded() {
-        let current = store.hasWaiting || !approvalStore.pending.isEmpty
-        let urgent = !approvalStore.pending.isEmpty
-            || store.waitingSessions.contains { $0.status == .approval || $0.status == .error }
-        let dotColor: NSColor = urgent
-            ? .systemRed
-            : Self.statusColors[.waiting] ?? .systemOrange
+        let urgency: BadgeDotModel.Urgency?
+        if !store.hasWaiting && approvalStore.pending.isEmpty {
+            urgency = nil
+        } else if !approvalStore.pending.isEmpty
+            || store.waitingSessions.contains(where: { $0.status == .approval || $0.status == .error }) {
+            urgency = .urgent
+        } else {
+            urgency = .normal
+        }
 
-        if current != lastHasWaiting {
-            lastHasWaiting = current
-            if current {
-                statusItem.button?.image = badgeIcon
-                showDot(color: dotColor)
-            } else {
-                hideDot() // restores the normal icon once the dot is gone
-            }
-        } else if current, let dot = dotLayer, dot.backgroundColor != dotColor.cgColor {
-            swapDotColor(to: dotColor)
+        let action = BadgeDotModel.transition(from: dotUrgency, to: urgency)
+        dotUrgency = urgency
+
+        switch action {
+        case .appear(let level):
+            statusItem.button?.image = badgeIcon
+            showDot(color: Self.dotColor(for: level))
+        case .disappear:
+            hideDot() // restores the normal icon once the dot is gone
+        case .swap(let level):
+            swapDotColor(to: Self.dotColor(for: level))
+        case .none:
+            break
         }
 
         // Notify for newly-waiting sessions
@@ -135,18 +141,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !newSessions.isEmpty {
             notificationManager.notifyIfEnabled(sessions: newSessions)
             notificationManager.playSoundIfEnabled()
-        } else if !current {
+        } else if urgency == nil {
             notificationManager.stopRepeatingSound()
         }
     }
 
     // MARK: - Animated badge dot (CALayer on the status button)
 
+    private static func dotColor(for urgency: BadgeDotModel.Urgency) -> NSColor {
+        switch urgency {
+        case .urgent: return .systemRed
+        case .normal: return Self.statusColors[.waiting] ?? .systemOrange
+        }
+    }
+
     private func showDot(color: NSColor) {
         dotGeneration += 1
         let dot = dotLayer ?? makeDotLayer()
         guard let dot else { return }
         dot.backgroundColor = color.cgColor
+
+        // A leftover fillMode-forwards disappear animation would pin the
+        // layer invisible if the dot is re-shown quickly.
+        dot.removeAnimation(forKey: "dotDisappear")
 
         let appear = CABasicAnimation(keyPath: "transform.scale")
         appear.fromValue = 0.01
