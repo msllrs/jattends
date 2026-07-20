@@ -329,10 +329,16 @@ async function activateSession(session: ParsedSession): Promise<void> {
 tell application "${appName}" to activate
 tell application "System Events"
   tell process "${appName}"
+    set visible to true
     set frontmost to true
     set windowList to every window
     repeat with w in windowList
       if name of w contains "${marker}" then
+        try
+          if value of attribute "AXMinimized" of w is true then
+            set value of attribute "AXMinimized" of w to false
+          end if
+        end try
         perform action "AXRaise" of w
         return "found"
       end if
@@ -357,16 +363,27 @@ return "not_found"`;
 tell application "${appName}" to activate
 tell application "System Events"
   tell process "${appName}"
+    set visible to true
     set frontmost to true
     set windowList to every window
     repeat with w in windowList
       if name of w contains "${projectName}" then
+        try
+          if value of attribute "AXMinimized" of w is true then
+            set value of attribute "AXMinimized" of w to false
+          end if
+        end try
         perform action "AXRaise" of w
         return "found"
       end if
     end repeat
     repeat with w in windowList
       if name of w contains "${cwdPath}" then
+        try
+          if value of attribute "AXMinimized" of w is true then
+            set value of attribute "AXMinimized" of w to false
+          end if
+        end try
         perform action "AXRaise" of w
         return "found"
       end if

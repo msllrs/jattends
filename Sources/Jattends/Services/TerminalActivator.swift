@@ -147,6 +147,17 @@ enum TerminalActivator {
     }
 
     private static func raiseWindowAndActivate(window: AXUIElement, pid: Int) -> Bool {
+        // Restore windows minimized to the Dock and unhide the app (⌘H) —
+        // raising alone leaves them invisible
+        var minimized: CFTypeRef?
+        if AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minimized) == .success,
+           (minimized as? Bool) == true {
+            AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, false as CFTypeRef)
+        }
+        if let app = NSRunningApplication(processIdentifier: pid_t(pid)), app.isHidden {
+            app.unhide()
+        }
+
         AXUIElementPerformAction(window, kAXRaiseAction as CFString)
         AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, true as CFTypeRef)
         if let app = NSRunningApplication(processIdentifier: pid_t(pid)) {
@@ -160,6 +171,9 @@ enum TerminalActivator {
     @discardableResult
     private static func activateByPID(_ pid: Int) -> Bool {
         guard let app = NSRunningApplication(processIdentifier: pid_t(pid)) else { return false }
+        if app.isHidden {
+            app.unhide()
+        }
         return app.activate()
     }
 
@@ -174,17 +188,28 @@ enum TerminalActivator {
 
         tell application "System Events"
             tell process "\(appName)"
+                set visible to true
                 set frontmost to true
                 try
                     set windowList to every window
                     repeat with w in windowList
                         if name of w contains "\(projectName)" then
+                            try
+                                if value of attribute "AXMinimized" of w is true then
+                                    set value of attribute "AXMinimized" of w to false
+                                end if
+                            end try
                             perform action "AXRaise" of w
                             return "found"
                         end if
                     end repeat
                     repeat with w in windowList
                         if name of w contains "\(cwdPath)" then
+                            try
+                                if value of attribute "AXMinimized" of w is true then
+                                    set value of attribute "AXMinimized" of w to false
+                                end if
+                            end try
                             perform action "AXRaise" of w
                             return "found"
                         end if
