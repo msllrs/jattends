@@ -19,14 +19,21 @@ enum TerminalActivator {
     private static var hasPromptedAccessibility = false
 
     /// Activate the terminal window for a session.
-    /// Uses the Accessibility API to find a window whose AXDocument matches the session's cwd,
-    /// falling back to AXTitle matching, then PID-based app activation as last resort.
+    /// Strategy order: OSC 2 title marker (exact window), AXDocument/AXTitle
+    /// matching, AppleScript title matching, then PID-based app activation.
     static func activate(session: SessionInfo) {
         // Prompt for Accessibility permission once per launch
         if !hasPromptedAccessibility && !AXIsProcessTrusted() {
             hasPromptedAccessibility = true
             let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
             AXIsProcessTrustedWithOptions(opts)
+        }
+
+        // Most precise: tag the session's tty with a unique window title via
+        // OSC 2, raise the window carrying it, then restore the title. Finds
+        // the exact tab even with several sessions in the same project.
+        if let pid = session.terminalPid, activateByTitleMarker(pid: pid, session: session) {
+            return
         }
 
         // Try AX-based window matching (AXDocument, then AXTitle)
@@ -49,6 +56,48 @@ enum TerminalActivator {
     private static func resolveAppName(_ termProgram: String?) -> String {
         guard let term = termProgram else { return "Terminal" }
         return appNameMap[term] ?? term
+    }
+
+    // MARK: - OSC 2 title-marker approach
+
+    /// Write a unique title to the session's tty, then raise the window whose
+    /// AXTitle contains it. Works with any terminal that honors OSC 2.
+    private static func activateByTitleMarker(pid: Int, session: SessionInfo) -> Bool {
+        guard AXIsProcessTrusted(),
+              let tty = session.terminalTty, tty.hasPrefix("/dev/")
+        else { return false }
+
+        let marker = "__jattends_\(session.sessionId.prefix(8))__"
+        guard writeToTty(tty, "\u{1B}]2;\(marker)\u{07}") else { return false }
+        defer { _ = writeToTty(tty, "\u{1B}]2;\u{07}") } // restore default title
+
+        // Give the terminal a moment to process the escape sequence
+        usleep(120_000)
+
+        let appElement = AXUIElementCreateApplication(pid_t(pid))
+        var windowsRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+              let windows = windowsRef as? [AXUIElement]
+        else { return false }
+
+        for window in windows {
+            if let title = axStringAttribute(window, kAXTitleAttribute), title.contains(marker) {
+                return raiseWindowAndActivate(window: window, pid: pid)
+            }
+        }
+        return false
+    }
+
+    private static func writeToTty(_ tty: String, _ text: String) -> Bool {
+        let fd = open(tty, O_WRONLY | O_NONBLOCK)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        var ok = false
+        text.utf8CString.withUnsafeBufferPointer { buf in
+            let count = buf.count - 1 // drop trailing NUL
+            ok = write(fd, buf.baseAddress, count) == count
+        }
+        return ok
     }
 
     // MARK: - Accessibility API approach

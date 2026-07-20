@@ -109,7 +109,8 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
             "sessionId": session.sessionId,
             "cwd": session.cwd,
             "terminalApp": session.terminalApp ?? "",
-            "terminalPid": session.terminalPid ?? 0
+            "terminalPid": session.terminalPid ?? 0,
+            "terminalTty": session.terminalTty ?? ""
         ]
 
         let request = UNNotificationRequest(
@@ -142,7 +143,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
                     status: .waiting,
                     terminalApp: terminalApp,
                     terminalPid: terminalPid != 0 ? terminalPid : nil,
-                    terminalTty: terminalTty,
+                    terminalTty: (terminalTty?.isEmpty ?? true) ? nil : terminalTty,
                     claudePid: nil,
                     updatedAt: Date()
                 )
