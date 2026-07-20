@@ -13,65 +13,58 @@ mkdir -p "$SESSIONS_DIR"
 
 # --- Shared helpers ---
 
-# Walk up the process tree from $$ to find the claude process PID
-find_claude_pid() {
-    local pid="$$"
-    local max_depth=5
-    local depth=0
-    while [ "$pid" -ne 1 ] && [ "$depth" -lt "$max_depth" ]; do
-        local pname
-        pname=$(ps -o comm= -p "$pid" 2>/dev/null | xargs basename 2>/dev/null || echo "")
-        if [ "$pname" = "claude" ]; then
-            echo "$pid"
-            return
-        fi
-        pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
-        [ -z "$pid" ] && break
-        depth=$((depth + 1))
-    done
-    echo ""
+# Walk the process tree to find claude PID, terminal PID, and terminal app name.
+# Uses a single `ps` call to get the full process table, then walks in-memory.
+# Output: three lines — claude_pid, terminal_pid, terminal_app
+find_process_info() {
+    local start_pid="$1"
+    /usr/bin/python3 -c "
+import subprocess, os, sys
+
+start = int(sys.argv[1])
+terminals = {'ghostty','Terminal','iTerm2','kitty','warp','Alacritty','WezTerm','Hyper'}
+
+# Single ps call to get all processes
+procs = {}
+for line in subprocess.check_output(['ps', '-eo', 'pid,ppid,comm'], text=True).splitlines()[1:]:
+    parts = line.split(None, 2)
+    if len(parts) >= 3:
+        procs[int(parts[0])] = (int(parts[1]), os.path.basename(parts[2]))
+
+claude_pid = ''
+terminal_pid = ''
+terminal_app = 'unknown'
+
+pid = start
+for _ in range(15):
+    if pid <= 1 or pid not in procs:
+        break
+    ppid, name = procs[pid]
+    if name == 'claude' and not claude_pid:
+        claude_pid = str(pid)
+    if name in terminals:
+        terminal_pid = str(pid)
+        terminal_app = name
+        break
+    pid = ppid
+
+print(claude_pid)
+print(terminal_pid)
+print(terminal_app)
+" "$start_pid"
 }
 
-# Walk up the process tree to find the terminal process PID
+# Legacy wrappers for scan mode (which walks from a claude PID, not $$)
 find_terminal_pid() {
-    local pid="$1"
-    local max_depth=10
-    local depth=0
-    while [ "$pid" -ne 1 ] && [ "$depth" -lt "$max_depth" ]; do
-        pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
-        [ -z "$pid" ] && break
-        local pname
-        pname=$(ps -o comm= -p "$pid" 2>/dev/null | xargs basename 2>/dev/null || echo "")
-        case "$pname" in
-            ghostty|Terminal|iTerm2|kitty|warp|Alacritty|WezTerm|Hyper)
-                echo "$pid"
-                return
-                ;;
-        esac
-        depth=$((depth + 1))
-    done
-    echo ""
+    local info
+    info=$(find_process_info "$1")
+    echo "$info" | sed -n '2p'
 }
 
-# Detect terminal app name from process tree
 find_terminal_app() {
-    local pid="$1"
-    local max_depth=10
-    local depth=0
-    while [ "$pid" -ne 1 ] && [ "$depth" -lt "$max_depth" ]; do
-        pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
-        [ -z "$pid" ] && break
-        local pname
-        pname=$(ps -o comm= -p "$pid" 2>/dev/null | xargs basename 2>/dev/null || echo "")
-        case "$pname" in
-            ghostty|Terminal|iTerm2|kitty|warp|Alacritty|WezTerm|Hyper)
-                echo "$pname"
-                return
-                ;;
-        esac
-        depth=$((depth + 1))
-    done
-    echo "unknown"
+    local info
+    info=$(find_process_info "$1")
+    echo "$info" | sed -n '3p'
 }
 
 write_session_file() {
@@ -156,63 +149,66 @@ print(d.get('terminalTty',''), d.get('cwd',''))
     exit 0
 fi
 
-# --- Normal hook mode: read event from stdin ---
+# --- Normal hook mode: read event from stdin, resolve status, write in one shot ---
 
-INPUT=$(cat)
-
-SESSION_ID=$(echo "$INPUT" | /usr/bin/python3 -c "import sys,json; print(json.load(sys.stdin)['session_id'])")
-EVENT=$(echo "$INPUT" | /usr/bin/python3 -c "import sys,json; print(json.load(sys.stdin)['hook_event_name'])")
-CWD=$(echo "$INPUT" | /usr/bin/python3 -c "import sys,json; print(json.load(sys.stdin)['cwd'])")
-
-SESSION_FILE="${SESSIONS_DIR}/${SESSION_ID}.json"
-
-TERM_APP="${TERM_PROGRAM:-unknown}"
-TERMINAL_PID=$(find_terminal_pid $$)
+# Get claude PID, terminal PID, and terminal app in one process tree walk
+PROC_INFO=$(find_process_info $$)
+CLAUDE_PID=$(echo "$PROC_INFO" | sed -n '1p')
+TERMINAL_PID=$(echo "$PROC_INFO" | sed -n '2p')
+TERM_APP_DETECTED=$(echo "$PROC_INFO" | sed -n '3p')
+TERM_APP="${TERM_APP_DETECTED:-${TERM_PROGRAM:-unknown}}"
 TERMINAL_TTY=$(tty 2>/dev/null || echo "")
-CLAUDE_PID=$(find_claude_pid)
 
-write_session() {
-    write_session_file "$SESSION_ID" "$CWD" "$1" "$TERM_APP" "${TERMINAL_PID:-}" "${TERMINAL_TTY:-}" "${CLAUDE_PID:-}"
+# Single python3 call: parse input, determine status, write session file (or delete)
+/usr/bin/python3 -c "
+import json, sys, os, datetime
+
+d = json.load(sys.stdin)
+event = d['hook_event_name']
+session_id = d['session_id']
+cwd = d['cwd']
+sessions_dir = sys.argv[1]
+session_file = os.path.join(sessions_dir, session_id + '.json')
+
+if event == 'SessionEnd':
+    try: os.remove(session_file)
+    except FileNotFoundError: pass
+    sys.exit(0)
+
+# Determine status
+status_map = {
+    'SessionStart': 'active',
+    'UserPromptSubmit': 'active',
+    'PermissionRequest': 'waiting',
 }
 
-case "$EVENT" in
-    SessionStart)
-        write_session "active"
-        ;;
-    UserPromptSubmit)
-        write_session "active"
-        ;;
-    PermissionRequest)
-        write_session "waiting"
-        ;;
-    Notification)
-        ENDS_WITH_QUESTION=$(echo "$INPUT" | /usr/bin/python3 -c "
-import sys, json
-msg = json.load(sys.stdin).get('last_assistant_message', '')
-print('yes' if msg.rstrip().endswith('?') else 'no')
-")
-        if [ "$ENDS_WITH_QUESTION" = "yes" ]; then
-            write_session "waiting"
-        else
-            write_session "active"
-        fi
-        ;;
-    Stop)
-        # Claude finished its turn — idle unless asking a question
-        ENDS_WITH_QUESTION=$(echo "$INPUT" | /usr/bin/python3 -c "
-import sys, json
-msg = json.load(sys.stdin).get('last_assistant_message', '')
-print('yes' if msg.rstrip().endswith('?') else 'no')
-")
-        if [ "$ENDS_WITH_QUESTION" = "yes" ]; then
-            write_session "waiting"
-        else
-            write_session "idle"
-        fi
-        ;;
-    SessionEnd)
-        rm -f "$SESSION_FILE"
-        ;;
-    *)
-        ;;
-esac
+if event in status_map:
+    status = status_map[event]
+elif event in ('Notification', 'Stop'):
+    msg = d.get('last_assistant_message', '')
+    asks_question = msg.rstrip().endswith('?')
+    if asks_question:
+        status = 'waiting'
+    elif event == 'Stop':
+        status = 'idle'
+    else:
+        status = 'active'
+else:
+    sys.exit(0)
+
+data = {
+    'sessionId': session_id,
+    'cwd': cwd,
+    'status': status,
+    'terminalApp': sys.argv[2],
+    'terminalPid': int(sys.argv[3]) if sys.argv[3] else None,
+    'terminalTty': sys.argv[4] if sys.argv[4] else None,
+    'claudePid': int(sys.argv[5]) if sys.argv[5] else None,
+    'updatedAt': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+}
+
+tmp = session_file + '.tmp'
+with open(tmp, 'w') as f:
+    json.dump(data, f)
+os.replace(tmp, session_file)
+" "$SESSIONS_DIR" "$TERM_APP" "${TERMINAL_PID:-}" "${TERMINAL_TTY:-}" "${CLAUDE_PID:-}"
