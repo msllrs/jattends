@@ -46,7 +46,7 @@ bash scripts/build.sh           # Build to .build/Jattends.app
 bash scripts/install.sh         # Build + install to /Applications + configure hooks
 bash scripts/install.sh --reset-accessibility  # Also reset Accessibility TCC
 
-python3 tests/test_hook.py      # Hook tests (stdlib unittest, ~1 min)
+python3 Tests/test_hook.py      # Hook tests (stdlib unittest, ~1 min)
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test  # Swift tests
 ```
 

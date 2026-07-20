@@ -90,9 +90,19 @@ class StatusMappingTests(HookTestCase):
                   message="Claude needs your permission to use Bash")
         self.assertEqual(self.read_session()["status"], "approval")
 
-    def test_notification_idle_prompt_is_waiting(self):
+    def test_notification_idle_prompt_is_ready_not_attention(self):
+        # An idle prompt just means the session is sitting at the prompt —
+        # showing it as "needs attention" nags the user about nothing.
         self.fire("Notification", notification_type="idle_prompt",
                   message="Claude is waiting for your input")
+        s = self.read_session()
+        self.assertEqual(s["status"], "idle")
+        self.assertIsNone(s["statusDetail"])
+
+    def test_notification_agent_needs_input_is_waiting(self):
+        # Genuine questions still demand attention.
+        self.fire("Notification", notification_type="agent_needs_input",
+                  message="Claude is asking a question")
         self.assertEqual(self.read_session()["status"], "waiting")
 
     def test_notification_auth_success_writes_nothing(self):
