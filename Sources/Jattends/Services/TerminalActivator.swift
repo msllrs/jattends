@@ -18,10 +18,28 @@ enum TerminalActivator {
 
     private static var hasPromptedAccessibility = false
 
+    /// Append a line to ~/.claude/jattends/debug.log — activation failures
+    /// are otherwise invisible (menu clicks have no UI for errors).
+    private static func log(_ message: String) {
+        let url = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/jattends/debug.log")
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        guard let data = "\(stamp) \(message)\n".data(using: .utf8) else { return }
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(data)
+            try? handle.close()
+        } else {
+            try? data.write(to: url)
+        }
+    }
+
     /// Activate the terminal window for a session.
     /// Strategy order: OSC 2 title marker (exact window), AXDocument/AXTitle
     /// matching, AppleScript title matching, then PID-based app activation.
     static func activate(session: SessionInfo) {
+        log("activate: \(session.projectName) pid=\(session.terminalPid.map(String.init) ?? "nil") tty=\(session.terminalTty ?? "nil") trusted=\(AXIsProcessTrusted())")
+
         // Prompt for Accessibility permission once per launch
         if !hasPromptedAccessibility && !AXIsProcessTrusted() {
             hasPromptedAccessibility = true
@@ -33,21 +51,25 @@ enum TerminalActivator {
         // OSC 2, raise the window carrying it, then restore the title. Finds
         // the exact tab even with several sessions in the same project.
         if let pid = session.terminalPid, activateByTitleMarker(pid: pid, session: session) {
+            log("  -> title marker matched")
             return
         }
 
         // Try AX-based window matching (AXDocument, then AXTitle)
         if let pid = session.terminalPid, activateByAX(pid: pid, session: session) {
+            log("  -> AX matched")
             return
         }
 
         // Fallback: try by app name with AppleScript title matching
         let appName = resolveAppName(session.terminalApp)
         if activateByAppleScript(appName: appName, session: session) {
+            log("  -> AppleScript matched")
             return
         }
 
         // Last resort: just bring the app forward
+        log("  -> PID fallback")
         if let pid = session.terminalPid {
             activateByPID(pid)
         }

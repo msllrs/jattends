@@ -82,6 +82,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             notificationManager.requestPermission()
         }
 
+        // Programmatic activation channel: lets external tools (and tests)
+        // trigger the same jump a menu click performs, by session id.
+        // e.g. swift -e 'import Foundation; DistributedNotificationCenter.default()
+        //   .postNotificationName(.init("com.jattends.activate"), object: "<sessionId>",
+        //    userInfo: nil, deliverImmediately: true)'
+        DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("com.jattends.activate"),
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let sessionId = note.object as? String,
+                  let session = self?.store.sessions.first(where: { $0.sessionId == sessionId })
+            else { return }
+            TerminalActivator.activate(session: session)
+        }
+
         // Force reload on wake from sleep — FSEvents can miss changes during sleep
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification,

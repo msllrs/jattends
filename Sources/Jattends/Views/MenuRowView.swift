@@ -142,6 +142,26 @@ final class MenuRowView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        performRowAction()
+    }
+
+    // Accessibility activation (VoiceOver, System Events "click") — a
+    // view-backed menu item only responds to what its view implements.
+    override func accessibilityPerformPress() -> Bool {
+        guard enclosingMenuItem?.isEnabled == true else { return false }
+        performRowAction()
+        return true
+    }
+
+    override func isAccessibilityElement() -> Bool { true }
+
+    override func accessibilityRole() -> NSAccessibility.Role? { .menuItem }
+
+    override func accessibilityLabel() -> String? {
+        enclosingMenuItem?.title
+    }
+
+    private func performRowAction() {
         guard let item = enclosingMenuItem, item.isEnabled else { return }
         mouseInside = false
         needsDisplay = true
