@@ -51,24 +51,42 @@ final class MenuRowView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    // Top-left origin so string drawing and our centering math share one
+    // coordinate system — mixing the default bottom-left origin with
+    // top-anchored text drawing made rows sit high or low when the menu
+    // stretched them to its minimum row height.
+    override var isFlipped: Bool { true }
+
     private var isRowHighlighted: Bool {
         (enclosingMenuItem?.isHighlighted ?? false) || mouseInside
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        // Debug aid: `defaults write com.jattends.app debugRowTint -bool true`
+        // paints the view's true bounds to diagnose row placement in the menu
+        if UserDefaults.standard.bool(forKey: "debugRowTint") {
+            NSColor.systemRed.withAlphaComponent(0.15).setFill()
+            bounds.fill()
+            NSColor.systemBlue.setFill()
+            NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill() // top (flipped)
+            NSColor.systemGreen.setFill()
+            NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1).fill() // bottom
+        }
+
         if isRowHighlighted, enclosingMenuItem?.isEnabled != false {
             let highlightRect = bounds.insetBy(dx: Self.highlightInsetX, dy: 0)
             Self.hoverColor.setFill()
             NSBezierPath(roundedRect: highlightRect, xRadius: 5, yRadius: 5).fill()
         }
 
-        // Center on the measured text height — the menu may stretch short
-        // rows to its minimum row height, and string drawing is top-anchored
+        // Center on the measured text height within the actual bounds (the
+        // menu may stretch short rows). The 1pt lift is optical: descenders
+        // drag the ink box down, so geometric centering reads as sitting low.
         let textWidth = bounds.width - Self.contentInsetX * 2 - (showsChevron ? 14 : 0)
         text.draw(
             in: NSRect(
                 x: Self.contentInsetX,
-                y: (bounds.height - textSize.height) / 2,
+                y: (bounds.height - textSize.height) / 2 - 1,
                 width: textWidth,
                 height: textSize.height
             )
