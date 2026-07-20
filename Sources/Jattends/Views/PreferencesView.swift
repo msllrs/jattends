@@ -49,7 +49,7 @@ struct PreferencesView: View {
             } header: {
                 Text("Notifications")
             } footer: {
-                Text("Show a macOS notification when a session needs attention.")
+                Text("Show a macOS notification when a session needs attention (waiting, question, error). Approval requests are separate — they notify whenever Approvals is on below.")
                     .foregroundStyle(.secondary)
             }
 
@@ -75,7 +75,7 @@ struct PreferencesView: View {
             } header: {
                 Text("Approvals")
             } footer: {
-                Text("When Claude asks for permission, show it here with Approve/Deny — no window switching. If you don't answer in time, the prompt appears in the terminal as usual.")
+                Text("When Claude asks for permission, show a notification with Approve/Deny — no window switching. Claude is paused waiting for your answer, so these always notify while this is on, even with notifications off above. If you don't answer in time, the prompt appears in the terminal as usual.")
                     .foregroundStyle(.secondary)
             }
 
