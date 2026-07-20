@@ -181,36 +181,12 @@ final class SessionStore {
 
         // Deduplicate by claudePid: keep the most recently updated session per Claude process,
         // delete stale duplicates (from session reconnects that didn't fire SessionEnd)
-        var byClaudePid: [Int: (URL, SessionInfo)] = [:]
-        var deduped: [SessionInfo] = []
-        for (file, session) in loaded {
-            guard let pid = session.claudePid else {
-                deduped.append(session)
-                continue
-            }
-            if let (existingFile, existing) = byClaudePid[pid] {
-                // Keep the one with higher-priority status, then most recent
-                let statusWins = existing.status < session.status
-                let sameTied = existing.status == session.status && existing.updatedAt >= session.updatedAt
-                let existingBetter = statusWins || sameTied
-                if existingBetter {
-                    try? fm.removeItem(at: file)
-                } else {
-                    try? fm.removeItem(at: existingFile)
-                    byClaudePid[pid] = (file, session)
-                }
-            } else {
-                byClaudePid[pid] = (file, session)
-            }
+        let (deduped, losers) = Self.dedupeByClaudePid(loaded)
+        for file in losers {
+            try? fm.removeItem(at: file)
         }
-        deduped.append(contentsOf: byClaudePid.values.map(\.1))
 
-        // Sort: attention states first, then working, then idle; within each
-        // group sort by updatedAt descending
-        sessions = deduped.sorted { a, b in
-            if a.status != b.status { return a.status < b.status }
-            return a.updatedAt > b.updatedAt
-        }
+        sessions = Self.sorted(deduped)
 
         // Track sessions that just transitioned into needing attention
         let currentWaitingIds = Set(sessions.filter { $0.status.needsAttention }.map(\.sessionId))
@@ -219,5 +195,43 @@ final class SessionStore {
         previousWaitingIds = currentWaitingIds
 
         onReload?()
+    }
+
+    /// Keep the best session per Claude PID (higher-priority status wins,
+    /// then most recent). Returns the surviving sessions and the files of
+    /// the losers, which the caller deletes.
+    static func dedupeByClaudePid(_ loaded: [(URL, SessionInfo)]) -> ([SessionInfo], [URL]) {
+        var byClaudePid: [Int: (URL, SessionInfo)] = [:]
+        var deduped: [SessionInfo] = []
+        var losers: [URL] = []
+        for (file, session) in loaded {
+            guard let pid = session.claudePid else {
+                deduped.append(session)
+                continue
+            }
+            if let (existingFile, existing) = byClaudePid[pid] {
+                let statusWins = existing.status < session.status
+                let sameTied = existing.status == session.status && existing.updatedAt >= session.updatedAt
+                if statusWins || sameTied {
+                    losers.append(file)
+                } else {
+                    losers.append(existingFile)
+                    byClaudePid[pid] = (file, session)
+                }
+            } else {
+                byClaudePid[pid] = (file, session)
+            }
+        }
+        deduped.append(contentsOf: byClaudePid.values.map(\.1))
+        return (deduped, losers)
+    }
+
+    /// Attention states first, then working, then idle; newest first within
+    /// each group.
+    static func sorted(_ sessions: [SessionInfo]) -> [SessionInfo] {
+        sessions.sorted { a, b in
+            if a.status != b.status { return a.status < b.status }
+            return a.updatedAt > b.updatedAt
+        }
     }
 }

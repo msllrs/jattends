@@ -93,6 +93,10 @@ def find_process_info(start_pid, procs):
 
 
 def app_running(procs):
+    # Test/debug override: JATTENDS_APP_RUNNING=0|1
+    override = os.environ.get("JATTENDS_APP_RUNNING")
+    if override in ("0", "1"):
+        return override == "1"
     return any(name == "Jattends" for _, _, name in procs.values())
 
 
