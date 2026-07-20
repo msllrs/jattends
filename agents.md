@@ -124,7 +124,8 @@ Reader conventions both implementations follow:
 | `PostToolUse` | `working` | Detail: "Running: npm test", "Editing: Store.swift", ... |
 | `PermissionRequest` | `approval` | May block for an in-app decision (see above) |
 | `Notification` (`permission_prompt`) | `approval` | |
-| `Notification` (`idle_prompt`, `agent_needs_input`, `elicitation_dialog`) | `waiting` | |
+| `Notification` (`idle_prompt`) | `idle` | Sitting at the prompt — treated like a plain `Stop` |
+| `Notification` (`agent_needs_input`, `elicitation_dialog`) | `waiting` | |
 | `Notification` (other) | *(ignored)* | auth_success etc. |
 | `Stop` | `idle`; `waiting` if message ends with `?` | The `?` check is a fallback for questions Claude asks without a Notification |
 | `StopFailure` | `error` | Detail carries the error type (rate_limit, ...) |

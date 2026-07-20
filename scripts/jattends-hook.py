@@ -293,8 +293,12 @@ def handle_event():
         if ntype == "permission_prompt" or "permission" in msg.lower():
             status = "approval"
             detail = msg[:120] or detail
-        elif ntype in ("idle_prompt", "agent_needs_input", "elicitation_dialog") \
-                or "waiting for your input" in msg.lower():
+        elif ntype == "idle_prompt" or "waiting for your input" in msg.lower():
+            # Sitting at the prompt is a ready state, not a request for
+            # attention — treat it exactly like a plain Stop.
+            status = "idle"
+            detail = None
+        elif ntype in ("agent_needs_input", "elicitation_dialog"):
             status = "waiting"
             detail = msg[:120] or detail
         else:
