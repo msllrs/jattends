@@ -7,6 +7,7 @@ import AppKit
 final class MenuRowView: NSView {
     private let text: NSAttributedString
     private let showsChevron: Bool
+    private let trailing: NSAttributedString?
     private var mouseInside = false
 
     private static let rowWidth: CGFloat = 280
@@ -21,9 +22,18 @@ final class MenuRowView: NSView {
             : NSColor(white: 0, alpha: 0.08)
     }
 
-    init(text: NSAttributedString, showsChevron: Bool = false) {
+    /// `trailing` renders right-aligned in secondary color — used for
+    /// keyboard-shortcut hints, which the system won't draw on view-backed
+    /// items.
+    init(text: NSAttributedString, showsChevron: Bool = false, trailing: String? = nil) {
         self.text = text
         self.showsChevron = showsChevron
+        self.trailing = trailing.map {
+            NSAttributedString(string: $0, attributes: [
+                .font: NSFont.menuFont(ofSize: 13),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ])
+        }
         let textWidth = Self.rowWidth - Self.contentInsetX * 2 - (showsChevron ? 14 : 0)
         let textHeight = text.boundingRect(
             with: NSSize(width: textWidth, height: .greatestFiniteMagnitude),
@@ -69,6 +79,22 @@ final class MenuRowView: NSView {
                 y: (bounds.height - size.height) / 2
             ))
         }
+
+        if let trailing {
+            let size = trailing.size()
+            trailing.draw(at: NSPoint(
+                x: bounds.width - Self.contentInsetX - size.width,
+                y: (bounds.height - size.height) / 2
+            ))
+        }
+    }
+
+    /// Plain single-line row text in the standard menu font.
+    static func plainTitle(_ string: String) -> NSAttributedString {
+        NSAttributedString(string: string, attributes: [
+            .font: NSFont.menuFont(ofSize: 13),
+            .foregroundColor: NSColor.labelColor,
+        ])
     }
 
     override func updateTrackingAreas() {

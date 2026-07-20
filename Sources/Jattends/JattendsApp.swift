@@ -190,6 +190,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             clearAll.target = self
             clearAll.isAlternate = true
             clearAll.keyEquivalentModifierMask = .option
+            clearAll.view = MenuRowView(text: MenuRowView.plainTitle("Clear All"))
             menu.addItem(clearAll)
 
             addSessionItems(waiting, to: menu)
@@ -215,9 +216,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let settings = NSMenuItem(title: "Settings\u{2026}", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
+        settings.view = MenuRowView(text: MenuRowView.plainTitle("Settings\u{2026}"), trailing: "⌘,")
         menu.addItem(settings)
 
         let quit = NSMenuItem(title: "Quit Jattends", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        quit.view = MenuRowView(text: MenuRowView.plainTitle("Quit Jattends"), trailing: "⌘Q")
         menu.addItem(quit)
     }
 
