@@ -26,6 +26,35 @@ final class SessionStore {
         return dir
     }()
 
+    private static let dismissedDirectory: URL = {
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/jattends/dismissed")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }()
+
+    /// Hide a session until its next activity: tombstone it so the process
+    /// scan won't resurrect it, then remove its file. Any real hook event
+    /// clears the tombstone and the session reappears.
+    func dismiss(_ session: SessionInfo) {
+        let fm = FileManager.default
+        fm.createFile(atPath: Self.dismissedDirectory
+            .appendingPathComponent("session-\(session.sessionId)").path, contents: nil)
+        if let pid = session.claudePid {
+            fm.createFile(atPath: Self.dismissedDirectory
+                .appendingPathComponent("pid-\(pid)").path, contents: nil)
+        }
+        try? fm.removeItem(at: Self.sessionsDirectory
+            .appendingPathComponent("\(session.sessionId).json"))
+        forceReload()
+    }
+
+    func dismissAll() {
+        for session in sessions {
+            dismiss(session)
+        }
+    }
+
     /// Only sessions needing attention (approval, waiting, error).
     var waitingSessions: [SessionInfo] {
         sessions.filter { $0.status.needsAttention }

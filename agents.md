@@ -16,6 +16,10 @@ Jattends is a macOS menu bar app (LSUIElement) built with Swift / SwiftUI, targe
 6. **TerminalActivator** raises the exact window: OSC 2 title marker → AX (AXDocument/AXTitle) → AppleScript → PID fallback
 7. **ApprovalStore** watches `~/.claude/jattends/approvals/` for permission requests written by the hook and writes decision files back
 
+### Dismissal ("hide until next activity")
+
+Dismissing a session (Option-click a row, or Clear All) is non-destructive: the app writes tombstone files to `~/.claude/jattends/dismissed/` (`session-<id>` and `pid-<claudePid>`) and deletes the session file. Scan mode skips tombstoned PIDs so the 10s scanner won't resurrect the row; any real hook event clears the tombstones and the session reappears. Tombstones expire after 24h or when the process dies.
+
 ### In-app approvals
 
 On `PermissionRequest`, the hook (if the app is running and `config.json` allows) writes `approvals/<requestId>.json` and polls up to `approvalWaitSeconds` (default 45) for `<requestId>.decision.json`. The app surfaces the request as a time-sensitive notification (Approve/Deny actions) and a menu section. A decision is forwarded to Claude Code as `hookSpecificOutput.decision` (`behavior: allow|deny`); on timeout the hook exits silently and the normal terminal prompt appears. The app mirrors approval preferences into `~/.claude/jattends/config.json` via `HookConfig.sync()`.

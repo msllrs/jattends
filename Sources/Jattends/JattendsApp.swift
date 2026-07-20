@@ -273,7 +273,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 symbol: "✕",
                 color: .secondaryLabelColor,
                 title: session.projectName,
-                detail: "Dismiss"
+                detail: "Hide until next activity"
             ))
             menu.addItem(alt)
         }
@@ -367,19 +367,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func clearAllSessions() {
-        let sessionDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude/jattends/sessions")
-        if let files = try? FileManager.default.contentsOfDirectory(at: sessionDir, includingPropertiesForKeys: nil) {
-            for file in files where file.pathExtension == "json" {
-                try? FileManager.default.removeItem(at: file)
-            }
-        }
+        store.dismissAll()
     }
 
     @objc private func dismissSession(_ sender: NSMenuItem) {
         guard let session = sender.representedObject as? SessionInfo else { return }
-        let sessionFile = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude/jattends/sessions/\(session.sessionId).json")
-        try? FileManager.default.removeItem(at: sessionFile)
+        store.dismiss(session)
     }
 }

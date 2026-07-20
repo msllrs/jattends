@@ -155,6 +155,54 @@ class StatusMappingTests(HookTestCase):
         self.assertEqual(r.returncode, 0)
 
 
+class DismissalTombstoneTests(HookTestCase):
+    def setUp(self):
+        super().setUp()
+        self.dismissed = os.path.join(self.home, ".claude", "jattends", "dismissed")
+        os.makedirs(self.dismissed)
+
+    def tombstone(self, name, age=0):
+        path = os.path.join(self.dismissed, name)
+        open(path, "w").close()
+        if age:
+            past = time.time() - age
+            os.utime(path, (past, past))
+        return path
+
+    def test_event_clears_tombstone_and_session_reappears(self):
+        path = self.tombstone("session-s1")
+        self.fire("UserPromptSubmit", prompt="back to work")
+        self.assertFalse(os.path.exists(path))
+        self.assertEqual(self.read_session()["status"], "working")
+
+    def test_session_end_clears_tombstone(self):
+        path = self.tombstone("session-s1")
+        self.fire("SessionEnd", reason="exit")
+        self.assertFalse(os.path.exists(path))
+
+    def test_scan_prunes_dead_pid_and_stale_tombstones(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("hook", HOOK)
+        hook = importlib.util.module_from_spec(spec)
+        env_home = os.environ.get("HOME")
+        os.environ["HOME"] = self.home
+        try:
+            spec.loader.exec_module(hook)
+        finally:
+            os.environ["HOME"] = env_home
+        dead_pid = self.tombstone("pid-999999999")
+        stale = self.tombstone("session-old", age=90000)
+        fresh = self.tombstone("session-fresh")
+        live_pid = self.tombstone("pid-12345")
+        hook.prune_tombstones({12345: (1, "??", "claude")})
+        self.assertFalse(os.path.exists(dead_pid))
+        self.assertFalse(os.path.exists(stale))
+        self.assertTrue(os.path.exists(fresh))
+        self.assertTrue(os.path.exists(live_pid))
+        self.assertTrue(hook.is_dismissed(12345))
+        self.assertFalse(hook.is_dismissed(999999999))
+
+
 class FakeJattends:
     """Make the hook believe the Jattends app is (or isn't) running,
     independent of whether the real app runs on this machine."""

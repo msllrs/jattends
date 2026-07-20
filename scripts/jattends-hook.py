@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 BASE_DIR = os.path.expanduser("~/.claude/jattends")
 SESSIONS_DIR = os.path.join(BASE_DIR, "sessions")
 APPROVALS_DIR = os.path.join(BASE_DIR, "approvals")
+DISMISSED_DIR = os.path.join(BASE_DIR, "dismissed")
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
 TERMINALS = {"ghostty", "Terminal", "iTerm2", "kitty", "warp", "stable",
@@ -126,6 +127,50 @@ def truncate_prompt(prompt):
     return first_line[:120] if first_line else None
 
 
+# --- Dismissal tombstones ---
+# The app writes these when the user dismisses a session ("hide until next
+# activity"). Scan mode won't resurrect a tombstoned process; any real hook
+# event clears the tombstone so the session reappears.
+
+def is_dismissed(pid):
+    return os.path.exists(os.path.join(DISMISSED_DIR, f"pid-{pid}"))
+
+
+def clear_tombstones(session_id, claude_pid):
+    names = [f"session-{session_id}"]
+    if claude_pid:
+        names.append(f"pid-{claude_pid}")
+    for name in names:
+        try:
+            os.remove(os.path.join(DISMISSED_DIR, name))
+        except FileNotFoundError:
+            pass
+
+
+def prune_tombstones(procs):
+    """Drop tombstones for dead processes and anything older than 24h."""
+    if not os.path.isdir(DISMISSED_DIR):
+        return
+    now = time.time()
+    for name in os.listdir(DISMISSED_DIR):
+        path = os.path.join(DISMISSED_DIR, name)
+        expired = False
+        try:
+            expired = now - os.path.getmtime(path) > 86400
+        except OSError:
+            continue
+        if name.startswith("pid-"):
+            try:
+                expired = expired or int(name[4:]) not in procs
+            except ValueError:
+                expired = True
+        if expired:
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+
+
 # --- Scan mode: discover untracked claude processes ---
 
 def scan():
@@ -145,8 +190,11 @@ def scan():
             tracked_cwds.add(d["cwd"])
 
     procs = process_table()
+    prune_tombstones(procs)
     for pid, (_, ptty, name) in procs.items():
         if name != "claude":
+            continue
+        if is_dismissed(pid):
             continue
         tty = "/dev/" + ptty if ptty not in ("??", "-", "") else None
         if tty and tty in tracked_ttys:
@@ -239,6 +287,13 @@ def handle_event():
     session_file = os.path.join(SESSIONS_DIR, session_id + ".json")
 
     if event == "SessionEnd":
+        claude_pid = None
+        try:
+            with open(session_file) as f:
+                claude_pid = json.load(f).get("claudePid")
+        except (OSError, ValueError):
+            pass
+        clear_tombstones(session_id, claude_pid)
         try:
             os.remove(session_file)
         except FileNotFoundError:
@@ -264,6 +319,9 @@ def handle_event():
         session["terminalPid"] = term_pid or session.get("terminalPid")
         session["terminalApp"] = (term_app or session.get("terminalApp")
                                   or os.environ.get("TERM_PROGRAM") or "unknown")
+
+    # Any real hook event is activity — undo a "hide until next activity"
+    clear_tombstones(session_id, session.get("claudePid"))
 
     status = None
     detail = session.get("statusDetail")
