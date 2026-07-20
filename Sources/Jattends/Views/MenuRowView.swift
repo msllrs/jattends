@@ -1,0 +1,110 @@
+import AppKit
+
+/// Custom menu-row view so hover highlights render as a neutral rounded
+/// rect instead of the accent-colored system highlight. Draws the same
+/// attributed title the standard items used, forwards clicks to the
+/// item's action, and shows a chevron for rows with submenus.
+final class MenuRowView: NSView {
+    private let text: NSAttributedString
+    private let showsChevron: Bool
+    private var mouseInside = false
+
+    private static let rowWidth: CGFloat = 280
+    private static let contentInsetX: CGFloat = 14
+    private static let highlightInsetX: CGFloat = 5
+    private static let verticalPadding: CGFloat = 5
+
+    /// Neutral hover fill that adapts to light/dark appearance.
+    private static let hoverColor = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(white: 1, alpha: 0.10)
+            : NSColor(white: 0, alpha: 0.08)
+    }
+
+    init(text: NSAttributedString, showsChevron: Bool = false) {
+        self.text = text
+        self.showsChevron = showsChevron
+        let textWidth = Self.rowWidth - Self.contentInsetX * 2 - (showsChevron ? 14 : 0)
+        let textHeight = text.boundingRect(
+            with: NSSize(width: textWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin]
+        ).height
+        super.init(frame: NSRect(
+            x: 0, y: 0,
+            width: Self.rowWidth,
+            height: ceil(textHeight) + Self.verticalPadding * 2
+        ))
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    private var isRowHighlighted: Bool {
+        (enclosingMenuItem?.isHighlighted ?? false) || mouseInside
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        if isRowHighlighted, enclosingMenuItem?.isEnabled != false {
+            let highlightRect = bounds.insetBy(dx: Self.highlightInsetX, dy: 0)
+            Self.hoverColor.setFill()
+            NSBezierPath(roundedRect: highlightRect, xRadius: 5, yRadius: 5).fill()
+        }
+
+        let textWidth = bounds.width - Self.contentInsetX * 2 - (showsChevron ? 14 : 0)
+        text.draw(
+            in: NSRect(
+                x: Self.contentInsetX, y: Self.verticalPadding,
+                width: textWidth, height: bounds.height - Self.verticalPadding * 2
+            )
+        )
+
+        if showsChevron {
+            let chevron = NSAttributedString(string: "›", attributes: [
+                .font: NSFont.menuFont(ofSize: 13),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ])
+            let size = chevron.size()
+            chevron.draw(at: NSPoint(
+                x: bounds.width - Self.contentInsetX - size.width + 4,
+                y: (bounds.height - size.height) / 2
+            ))
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways],
+            owner: self
+        ))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        mouseInside = true
+        needsDisplay = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        mouseInside = false
+        needsDisplay = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let item = enclosingMenuItem, item.isEnabled else { return }
+        mouseInside = false
+        needsDisplay = true
+        item.menu?.cancelTracking()
+        if let action = item.action {
+            NSApp.sendAction(action, to: item.target, from: item)
+        }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // Reset hover state each time the menu (re)opens
+        mouseInside = false
+        needsDisplay = true
+    }
+}

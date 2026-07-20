@@ -156,7 +156,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
             for request in approvals {
                 let item = NSMenuItem(title: request.projectName, action: nil, keyEquivalent: "")
-                item.attributedTitle = makeApprovalTitle(for: request)
+                item.view = MenuRowView(text: makeApprovalTitle(for: request), showsChevron: true)
 
                 let submenu = NSMenu()
                 let approve = NSMenuItem(title: "Approve", action: #selector(approveRequest(_:)), keyEquivalent: "")
@@ -258,7 +258,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let item = NSMenuItem(title: session.projectName, action: #selector(sessionClicked(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = session
-            item.attributedTitle = makeAttributedTitle(for: session)
+            item.view = MenuRowView(text: makeAttributedTitle(for: session))
             menu.addItem(item)
 
             let alt = NSMenuItem(title: session.projectName, action: #selector(dismissSession(_:)), keyEquivalent: "")
@@ -266,8 +266,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             alt.representedObject = session
             alt.isAlternate = true
             alt.keyEquivalentModifierMask = .option
-            alt.image = NSImage(systemSymbolName: "xmark.circle", accessibilityDescription: "Dismiss")
-            alt.image?.size = NSSize(width: 14, height: 14)
+            alt.view = MenuRowView(text: Self.makeMenuItemTitle(
+                symbol: "✕",
+                color: .secondaryLabelColor,
+                title: session.projectName,
+                detail: "Dismiss"
+            ))
             menu.addItem(alt)
         }
     }
