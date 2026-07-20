@@ -13,7 +13,6 @@ struct JattendsApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let store = SessionStore()
-    private var timer: Timer?
     private var lastHasWaiting = false
 
     private let normalIcon = MenuBarIcon.buildIcon(badge: false)
@@ -45,6 +44,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         hotkeyManager.update()
 
+        store.onReload = { [weak self] in
+            self?.updateIconIfNeeded()
+        }
+        store.refreshLiveCwds()
         store.startWatching()
 
         // Force reload on wake from sleep — FSEvents can miss changes during sleep
@@ -53,12 +56,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
+            self?.store.refreshLiveCwds()
             self?.store.forceReload()
-        }
-
-        // UI update timer (icon, notifications)
-        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            self?.updateIconIfNeeded()
         }
 
         // Safety-net periodic reload every 10s to catch missed FSEvents and clean dead PIDs
@@ -66,6 +65,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         scanForSessions()
         Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             self?.scanForSessions()
+            self?.store.refreshLiveCwds()
             self?.store.forceReload()
         }
     }

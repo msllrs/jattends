@@ -30,7 +30,7 @@ final class SessionDirectoryWatcher: @unchecked Sendable {
             &context,
             pathsToWatch,
             FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
-            0.3, // 300ms coalesce latency
+            0.1, // 100ms coalesce latency
             UInt32(kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagUseCFTypes)
         ) else { return }
 

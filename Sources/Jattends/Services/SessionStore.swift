@@ -14,6 +14,10 @@ final class SessionStore {
     }
     private var watcher: SessionDirectoryWatcher?
     private var previousWaitingIds: Set<String> = []
+    /// Cached live Claude cwds — refreshed periodically, not on every reload
+    private var cachedLiveCwds: Set<String> = []
+    /// Called after each reload so the UI can update immediately.
+    var onReload: (() -> Void)?
 
     private static let sessionsDirectory: URL = {
         let dir = FileManager.default.homeDirectoryForCurrentUser
@@ -57,6 +61,16 @@ final class SessionStore {
         reload()
     }
 
+    /// Refresh the cached set of live Claude cwds on a background thread.
+    func refreshLiveCwds() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let cwds = self?.liveClaudeCwds() ?? []
+            DispatchQueue.main.async {
+                self?.cachedLiveCwds = cwds
+            }
+        }
+    }
+
     /// Check if a process is still running.
     private func isProcessAlive(_ pid: Int) -> Bool {
         kill(pid_t(pid), 0) == 0
@@ -90,8 +104,10 @@ final class SessionStore {
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
         try process.run()
+        // Read before waiting to avoid deadlock if output exceeds pipe buffer
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        return String(data: data, encoding: .utf8) ?? ""
     }
 
     private func reload() {
@@ -111,10 +127,9 @@ final class SessionStore {
         let autoClearMinutes = UserDefaults.standard.integer(forKey: "autoClearMinutes")
         let autoClearInterval: TimeInterval? = autoClearMinutes > 0 ? TimeInterval(autoClearMinutes * 60) : nil
 
-        // Build set of cwds with live claude processes (for legacy sessions without claudePid)
-        let liveCwds = liveClaudeCwds()
+        let liveCwds = cachedLiveCwds
 
-        var loaded: [SessionInfo] = []
+        var loaded: [(URL, SessionInfo)] = []
         for file in files {
             guard let data = try? Data(contentsOf: file),
                   let session = try? decoder.decode(SessionInfo.self, from: data)
@@ -148,11 +163,37 @@ final class SessionStore {
                 try? fm.removeItem(at: file)
                 continue
             }
-            loaded.append(session)
+            loaded.append((file, session))
         }
 
+        // Deduplicate by claudePid: keep the most recently updated session per Claude process,
+        // delete stale duplicates (from session reconnects that didn't fire SessionEnd)
+        var byClaudePid: [Int: (URL, SessionInfo)] = [:]
+        var deduped: [SessionInfo] = []
+        for (file, session) in loaded {
+            guard let pid = session.claudePid else {
+                deduped.append(session)
+                continue
+            }
+            if let (existingFile, existing) = byClaudePid[pid] {
+                // Keep the one with higher-priority status, then most recent
+                let statusWins = existing.status < session.status
+                let sameTied = existing.status == session.status && existing.updatedAt >= session.updatedAt
+                let existingBetter = statusWins || sameTied
+                if existingBetter {
+                    try? fm.removeItem(at: file)
+                } else {
+                    try? fm.removeItem(at: existingFile)
+                    byClaudePid[pid] = (file, session)
+                }
+            } else {
+                byClaudePid[pid] = (file, session)
+            }
+        }
+        deduped.append(contentsOf: byClaudePid.values.map(\.1))
+
         // Sort: waiting first, then active, then idle; within each group sort by updatedAt descending
-        sessions = loaded.sorted { a, b in
+        sessions = deduped.sorted { a, b in
             if a.status != b.status { return a.status < b.status }
             return a.updatedAt > b.updatedAt
         }
@@ -162,5 +203,7 @@ final class SessionStore {
         let newIds = currentWaitingIds.subtracting(previousWaitingIds)
         newlyWaitingSessions = sessions.filter { newIds.contains($0.sessionId) }
         previousWaitingIds = currentWaitingIds
+
+        onReload?()
     }
 }
