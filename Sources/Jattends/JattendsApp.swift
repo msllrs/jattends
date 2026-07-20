@@ -71,7 +71,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.updateIconIfNeeded()
         }
         approvalStore.startWatching()
-        if UserDefaults.standard.object(forKey: "inAppApprovals") as? Bool ?? true {
+        if UserDefaults.standard.bool(forKey: "notificationsEnabled") {
             notificationManager.requestPermission()
         }
 

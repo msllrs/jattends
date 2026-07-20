@@ -62,9 +62,13 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     }
 
     /// Notify for a pending permission request with Approve/Deny actions.
-    /// Sent regardless of the notificationsEnabled preference only when the
-    /// in-app approvals feature itself is on — the hook is blocked waiting.
+    /// Gated on the master notifications toggle plus the approvals sub-toggle;
+    /// with either off, pending approvals appear only in the menu.
     func notifyApproval(_ request: ApprovalRequest) {
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: "notificationsEnabled"),
+              defaults.object(forKey: "notifyApprovals") as? Bool ?? true
+        else { return }
         let content = UNMutableNotificationContent()
         content.title = "\(request.projectName) — approve \(request.toolName)?"
         content.body = request.summary
@@ -98,7 +102,10 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     /// Send notifications for newly waiting sessions.
     func notifyIfEnabled(sessions: [SessionInfo]) {
-        guard UserDefaults.standard.bool(forKey: "notificationsEnabled") else { return }
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: "notificationsEnabled"),
+              defaults.object(forKey: "notifyAttention") as? Bool ?? true
+        else { return }
 
         for session in sessions {
             sendNotification(for: session)

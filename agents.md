@@ -82,7 +82,9 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test  # Swift tes
 |-----|------|---------|---------|
 | `inAppApprovals` | Bool | `true` | Answer permission requests from Jattends |
 | `approvalWaitSeconds` | Double | `45` | How long the hook waits for a decision |
-| `notificationsEnabled` | Bool | `false` | Enable attention notifications |
+| `notificationsEnabled` | Bool | `false` | Master switch for all notifications |
+| `notifyAttention` | Bool | `true` | Sub-toggle: session needs attention (waiting/question/error) |
+| `notifyApprovals` | Bool | `true` | Sub-toggle: approval requests with Approve/Deny actions |
 | `soundEnabled` | Bool | `false` | Enable sound alerts |
 | `alertSoundName` | String | `"Glass"` | Which system sound to play |
 | `soundRepeat` | Bool | `false` | Repeat sound until dismissed |

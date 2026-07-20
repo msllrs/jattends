@@ -4,6 +4,8 @@ import ServiceManagement
 struct PreferencesView: View {
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @AppStorage("notificationsEnabled") private var notificationsEnabled = false
+    @AppStorage("notifyAttention") private var notifyAttention = true
+    @AppStorage("notifyApprovals") private var notifyApprovals = true
     @AppStorage("soundEnabled") private var soundEnabled = false
     @AppStorage("alertSoundName") private var alertSoundName = "Glass"
     @AppStorage("soundRepeat") private var soundRepeat = false
@@ -46,10 +48,14 @@ struct PreferencesView: View {
                             NotificationManager.shared.requestPermission()
                         }
                     }
+                Toggle("Session needs attention", isOn: $notifyAttention)
+                    .disabled(!notificationsEnabled)
+                Toggle("Approval requests", isOn: $notifyApprovals)
+                    .disabled(!notificationsEnabled)
             } header: {
                 Text("Notifications")
             } footer: {
-                Text("Show a macOS notification when a session needs attention (waiting, question, error). Approval requests are separate — they notify whenever Approvals is on below.")
+                Text("Session notifications cover waiting, questions, and errors. Approval notifications come with Approve/Deny buttons.")
                     .foregroundStyle(.secondary)
             }
 
@@ -75,7 +81,7 @@ struct PreferencesView: View {
             } header: {
                 Text("Approvals")
             } footer: {
-                Text("When Claude asks for permission, show a notification with Approve/Deny — no window switching. Claude is paused waiting for your answer, so these always notify while this is on, even with notifications off above. If you don't answer in time, the prompt appears in the terminal as usual.")
+                Text("When Claude asks for permission, answer from Jattends — no window switching. Requests show in the menu with a red dot; turn on approval notifications above to Approve/Deny without opening it. If you don't answer in time, the prompt appears in the terminal as usual.")
                     .foregroundStyle(.secondary)
             }
 
