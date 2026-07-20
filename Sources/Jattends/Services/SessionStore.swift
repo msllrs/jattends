@@ -255,6 +255,13 @@ final class SessionStore {
         return (deduped, losers)
     }
 
+    /// Drop sessions that already have a pending approval request — the
+    /// approval row represents them with richer actions, so showing them
+    /// again in a session group would duplicate the entry. Preserves order.
+    static func hidingPendingApprovals(_ sessions: [SessionInfo], approvalSessionIds: Set<String>) -> [SessionInfo] {
+        sessions.filter { !approvalSessionIds.contains($0.sessionId) }
+    }
+
     /// Attention states first, then working, then idle; newest first within
     /// each group.
     static func sorted(_ sessions: [SessionInfo]) -> [SessionInfo] {

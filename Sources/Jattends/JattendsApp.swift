@@ -200,8 +200,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             break
         }
 
-        // Notify for newly-waiting sessions
-        let newSessions = store.consumeNewlyWaiting()
+        // Notify for newly-waiting sessions — skip ones with a pending
+        // approval, since the approval notification already covers them.
+        let newSessions = SessionStore.hidingPendingApprovals(
+            store.consumeNewlyWaiting(),
+            approvalSessionIds: Set(approvalStore.pending.map(\.sessionId)))
         if !newSessions.isEmpty {
             notificationManager.notifyIfEnabled(sessions: newSessions)
             notificationManager.playSoundIfEnabled()
@@ -328,9 +331,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         let approvals = approvalStore.pending
-        let waiting = store.waitingSessions
-        let working = store.workingSessions
-        let idle = store.idleSessions
+        // Sessions with a pending approval are already represented by the
+        // approval rows above (with richer actions) — hide them from the
+        // session groups so they don't appear twice.
+        let approvalSessionIds = Set(approvals.map(\.sessionId))
+        let waiting = SessionStore.hidingPendingApprovals(store.waitingSessions, approvalSessionIds: approvalSessionIds)
+        let working = SessionStore.hidingPendingApprovals(store.workingSessions, approvalSessionIds: approvalSessionIds)
+        let idle = SessionStore.hidingPendingApprovals(store.idleSessions, approvalSessionIds: approvalSessionIds)
 
         if approvals.isEmpty && waiting.isEmpty && working.isEmpty && idle.isEmpty {
             let item = NSMenuItem(title: "No Claude sessions", action: nil, keyEquivalent: "")
