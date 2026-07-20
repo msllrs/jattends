@@ -102,8 +102,8 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     private func sendNotification(for session: SessionInfo) {
         let content = UNMutableNotificationContent()
-        content.title = "Jattends"
-        content.body = "\(session.projectName) needs attention"
+        content.title = "\(session.projectName) — \(session.status.label)"
+        content.body = session.statusDetail ?? session.lastPrompt ?? "Needs attention"
         content.categoryIdentifier = Self.categoryIdentifier
         content.userInfo = [
             "sessionId": session.sessionId,

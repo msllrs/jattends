@@ -72,11 +72,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func scanForSessions() {
         let hookPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude/hooks/jattends-hook.sh").path
+            .appendingPathComponent(".claude/hooks/jattends-hook.py").path
         guard FileManager.default.isExecutableFile(atPath: hookPath) else { return }
         DispatchQueue.global(qos: .utility).async {
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/bash")
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
             process.arguments = [hookPath, "--scan"]
             process.standardOutput = FileHandle.nullDevice
             process.standardError = FileHandle.nullDevice
@@ -115,14 +115,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
 
-        let sessions = store.waitingSessions
+        let waiting = store.waitingSessions
+        let working = store.workingSessions
+        let idle = store.idleSessions
 
-        if sessions.isEmpty {
-            let item = NSMenuItem(title: "Nothing needs attention", action: nil, keyEquivalent: "")
+        if waiting.isEmpty && working.isEmpty && idle.isEmpty {
+            let item = NSMenuItem(title: "No Claude sessions", action: nil, keyEquivalent: "")
             item.isEnabled = false
             menu.addItem(item)
-        } else {
-            let header = NSMenuItem(title: "\(sessions.count) waiting", action: nil, keyEquivalent: "")
+        }
+
+        if !waiting.isEmpty {
+            let header = NSMenuItem(title: "\(waiting.count) need\(waiting.count == 1 ? "s" : "") attention", action: nil, keyEquivalent: "")
             header.isEnabled = false
             menu.addItem(header)
 
@@ -132,27 +136,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             clearAll.keyEquivalentModifierMask = .option
             menu.addItem(clearAll)
 
-            menu.addItem(NSMenuItem.separator())
+            addSessionItems(waiting, to: menu)
+        }
 
-            for session in sessions {
-                // Normal click: focus terminal
-                let item = NSMenuItem(title: session.projectName, action: #selector(sessionClicked(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = session
-                let barColor: NSColor = NSColor(red: 0xd7/255, green: 0x77/255, blue: 0x57/255, alpha: 1)
-                item.attributedTitle = makeAttributedTitle(bar: barColor, name: session.projectName)
-                menu.addItem(item)
+        if !working.isEmpty {
+            if !waiting.isEmpty { menu.addItem(NSMenuItem.separator()) }
+            let header = NSMenuItem(title: "Working", action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            menu.addItem(header)
+            addSessionItems(working, to: menu)
+        }
 
-                // Option+click: dismiss session
-                let alt = NSMenuItem(title: session.projectName, action: #selector(dismissSession(_:)), keyEquivalent: "")
-                alt.target = self
-                alt.representedObject = session
-                alt.isAlternate = true
-                alt.keyEquivalentModifierMask = .option
-                alt.image = NSImage(systemSymbolName: "xmark.circle", accessibilityDescription: "Dismiss")
-                alt.image?.size = NSSize(width: 14, height: 14)
-                menu.addItem(alt)
-            }
+        if !idle.isEmpty {
+            if !waiting.isEmpty || !working.isEmpty { menu.addItem(NSMenuItem.separator()) }
+            let header = NSMenuItem(title: "Ready", action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            menu.addItem(header)
+            addSessionItems(idle, to: menu)
         }
 
         menu.addItem(NSMenuItem.separator())
@@ -196,19 +196,62 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func makeAttributedTitle(bar: NSColor, name: String) -> NSAttributedString {
+    /// Add a click-to-focus item plus an Option-alternate dismiss item per session.
+    private func addSessionItems(_ sessions: [SessionInfo], to menu: NSMenu) {
+        for session in sessions {
+            let item = NSMenuItem(title: session.projectName, action: #selector(sessionClicked(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = session
+            item.attributedTitle = makeAttributedTitle(for: session)
+            menu.addItem(item)
+
+            let alt = NSMenuItem(title: session.projectName, action: #selector(dismissSession(_:)), keyEquivalent: "")
+            alt.target = self
+            alt.representedObject = session
+            alt.isAlternate = true
+            alt.keyEquivalentModifierMask = .option
+            alt.image = NSImage(systemSymbolName: "xmark.circle", accessibilityDescription: "Dismiss")
+            alt.image?.size = NSSize(width: 14, height: 14)
+            menu.addItem(alt)
+        }
+    }
+
+    private static let statusColors: [SessionStatus: NSColor] = [
+        .approval: .systemRed,
+        .waiting: NSColor(red: 0xd7/255, green: 0x77/255, blue: 0x57/255, alpha: 1),
+        .error: .systemRed,
+        .working: .systemGreen,
+        .compacting: .systemBlue,
+        .idle: .tertiaryLabelColor,
+    ]
+
+    private static let statusSymbols: [SessionStatus: String] = [
+        .approval: "✱", .waiting: "✱", .error: "✕",
+        .working: "●", .compacting: "◐", .idle: "○",
+    ]
+
+    private func makeAttributedTitle(for session: SessionInfo) -> NSAttributedString {
         let result = NSMutableAttributedString()
 
-        let barAttrs: [NSAttributedString.Key: Any] = [
-            .foregroundColor: bar,
+        let symbol = Self.statusSymbols[session.status] ?? "○"
+        let color = Self.statusColors[session.status] ?? .secondaryLabelColor
+        result.append(NSAttributedString(string: "\(symbol)  ", attributes: [
+            .foregroundColor: color,
             .font: NSFont.systemFont(ofSize: 11, weight: .medium),
-        ]
-        result.append(NSAttributedString(string: "✱  ", attributes: barAttrs))
+        ]))
 
-        let nameAttrs: [NSAttributedString.Key: Any] = [
+        result.append(NSAttributedString(string: session.projectName, attributes: [
             .font: NSFont.menuFont(ofSize: 13),
-        ]
-        result.append(NSAttributedString(string: name, attributes: nameAttrs))
+        ]))
+
+        // Secondary line: what the session is doing / why it needs attention
+        let detail = session.statusDetail ?? (session.status.needsAttention ? session.status.label : nil)
+        if let detail, !detail.isEmpty {
+            result.append(NSAttributedString(string: "\n    \(detail.prefix(60))", attributes: [
+                .font: NSFont.menuFont(ofSize: 11),
+                .foregroundColor: NSColor.secondaryLabelColor,
+            ]))
+        }
 
         return result
     }
