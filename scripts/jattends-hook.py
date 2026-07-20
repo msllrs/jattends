@@ -401,6 +401,7 @@ def handle_event():
     elif event == "UserPromptSubmit":
         status = "working"
         detail = None
+        session["turnStartedAt"] = utcnow()
         prompt = truncate_prompt(d.get("prompt", ""))
         if prompt:
             session["lastPrompt"] = prompt

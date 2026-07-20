@@ -149,6 +149,13 @@ class StatusMappingTests(HookTestCase):
         self.fire("Stop", last_assistant_message="Done.")
         self.assertEqual(self.read_session()["lastPrompt"], "do the thing")
 
+    def test_prompt_submit_stamps_turn_start(self):
+        self.fire("UserPromptSubmit", prompt="go")
+        started = self.read_session()["turnStartedAt"]
+        self.assertTrue(started.endswith("Z"))
+        self.fire("PostToolUse", tool_name="Read", tool_input={"file_path": "/x.txt"})
+        self.assertEqual(self.read_session()["turnStartedAt"], started)
+
     def test_malformed_input_never_fails(self):
         r = subprocess.run([sys.executable, HOOK], input="not json",
                            text=True, capture_output=True, env=self.env)

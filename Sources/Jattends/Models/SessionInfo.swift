@@ -14,6 +14,7 @@ struct SessionInfo: Codable, Identifiable {
     let permissionMode: String?
     let transcriptPath: String?
     let subagentCount: Int?
+    let turnStartedAt: Date?
 
     init(
         sessionId: String,
@@ -28,7 +29,8 @@ struct SessionInfo: Codable, Identifiable {
         lastPrompt: String? = nil,
         permissionMode: String? = nil,
         transcriptPath: String? = nil,
-        subagentCount: Int? = nil
+        subagentCount: Int? = nil,
+        turnStartedAt: Date? = nil
     ) {
         self.sessionId = sessionId
         self.cwd = cwd
@@ -43,6 +45,16 @@ struct SessionInfo: Codable, Identifiable {
         self.permissionMode = permissionMode
         self.transcriptPath = transcriptPath
         self.subagentCount = subagentCount
+        self.turnStartedAt = turnStartedAt
+    }
+
+    /// Compact elapsed-time label: "42s", "6m", "1h 12m".
+    static func shortDuration(since start: Date, now: Date = Date()) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(start)))
+        if seconds < 60 { return "\(seconds)s" }
+        let minutes = seconds / 60
+        if minutes < 60 { return "\(minutes)m" }
+        return "\(minutes / 60)h \(minutes % 60)m"
     }
 
     var id: String { sessionId }
