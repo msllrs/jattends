@@ -16,22 +16,24 @@ Grant **Accessibility** permission when prompted — this lets Jattends raise th
 
 ## How it works
 
-Jattends uses Claude Code [hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) to track session state. When something needs your attention — a tool approval, a question, a notification — a badge appears in your menubar. Click a session to jump straight to the right terminal window.
+Jattends uses Claude Code [hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) to track session state. When something needs your attention — a tool approval, a question, an error — a badge appears in your menubar. Click a session to jump straight to the right terminal window, or approve permission requests without leaving what you're doing.
 
 <img src="Resources/screenshot.png" alt="Jattends menubar dropdown" width="420">
 
 ## Features
 
-- **Menubar badge** — see at a glance when sessions are waiting
-- **Terminal focus** — click a session to raise the exact window
+- **Approve from the menu bar** — when Claude asks for permission, answer Approve/Deny from a notification or the menu; no window switching. If you don't answer in time, the prompt appears in the terminal as usual
+- **Live session states** — needs approval, waiting, error, working (with what it's doing: "Running: npm test", "Editing: Store.swift"), compacting, ready
+- **Menubar badge** — see at a glance when any session needs you
+- **Terminal focus** — click a session to raise the exact window/tab (OSC 2 title tagging, so two sessions in the same project resolve correctly)
 - **Dismiss** — Option+click a session to dismiss it, or Option+click the header to clear all
-- **Notifications** — native macOS notifications when a session starts waiting
+- **Notifications** — native macOS notifications with the session's status and detail
 - **Sound alerts** — play a system sound, with an option to repeat until dismissed
 - **Global shortcut** — jump to the most recent waiting session from any app
-- **Auto-clear** — automatically dismiss waiting sessions after a configurable timeout
+- **Auto-clear** — automatically dismiss attention-needing sessions after a configurable timeout
 - **Multi-terminal** — Ghostty, Terminal.app, iTerm2, kitty, Warp, Alacritty, WezTerm, Hyper, VS Code
 
-Notifications, sound, shortcut, and auto-clear are off by default. Configure in Settings (menubar icon → Settings).
+In-app approvals are on by default. Notifications, sound, shortcut, and auto-clear are off by default. Configure in Settings (menubar icon → Settings).
 
 ## Raycast Extension
 
