@@ -8,13 +8,20 @@ enum MenuBarIcon {
     </svg>
     """
 
+    // Frame with a notch cut out for the badge dot — the dot itself is a
+    // CALayer on the status button so it can animate in and out.
     private static let badgeSVG = """
     <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" fill="none" viewBox="0 0 36 36">
       <path fill="#fff" d="M21.072 4a7.942 7.942 0 0 0-1.008 3H10a3 3 0 0 0-3 3v16a3 3 0 0 0 3 3h16a3 3 0 0 0 3-3V15.935a7.94 7.94 0 0 0 3-1.01V26a6 6 0 0 1-6 6H10a6 6 0 0 1-6-6V10a6 6 0 0 1 6-6h11.072Z"/>
       <path fill="#fff" d="M16.714 24v-3.815l-3.428 1.908L12 19.907 15.393 18 12 16.093l1.286-2.185 3.428 1.907V12h2.607v3.815l3.393-1.907L24 16.093 20.607 18 24 19.907l-1.286 2.186-3.393-1.908V24h-2.607Z"/>
-      <circle cx="28" cy="8" r="5.5" fill="#d77757"/>
     </svg>
     """
+
+    /// Badge dot geometry: circle at (28, 8) r 5.5 in the 36pt viewBox,
+    /// scaled to the 18pt icon.
+    static let dotSize: CGFloat = 5.5
+    static let dotCenter = CGPoint(x: 14, y: 4)
+    static let iconSize: CGFloat = 18
 
     static func buildIcon(badge: Bool) -> NSImage {
         let svgString = badge ? badgeSVG : normalSVG
@@ -22,8 +29,8 @@ enum MenuBarIcon {
               let img = NSImage(data: data) else {
             return NSImage()
         }
-        img.size = NSSize(width: 18, height: 18)
-        img.isTemplate = !badge
+        img.size = NSSize(width: iconSize, height: iconSize)
+        img.isTemplate = true
         return img
     }
 }

@@ -15,6 +15,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let store = SessionStore()
     private let approvalStore = ApprovalStore()
     private var lastHasWaiting = false
+    private var dotLayer: CALayer?
+    private var dotGeneration = 0
 
     private let normalIcon = MenuBarIcon.buildIcon(badge: false)
     private let badgeIcon = MenuBarIcon.buildIcon(badge: true)
@@ -110,9 +112,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func updateIconIfNeeded() {
         let current = store.hasWaiting || !approvalStore.pending.isEmpty
+        let urgent = !approvalStore.pending.isEmpty
+            || store.waitingSessions.contains { $0.status == .approval || $0.status == .error }
+        let dotColor: NSColor = urgent
+            ? .systemRed
+            : Self.statusColors[.waiting] ?? .systemOrange
+
         if current != lastHasWaiting {
             lastHasWaiting = current
-            statusItem.button?.image = current ? badgeIcon : normalIcon
+            if current {
+                statusItem.button?.image = badgeIcon
+                showDot(color: dotColor)
+            } else {
+                hideDot() // restores the normal icon once the dot is gone
+            }
+        } else if current, let dot = dotLayer, dot.backgroundColor != dotColor.cgColor {
+            swapDotColor(to: dotColor)
         }
 
         // Notify for newly-waiting sessions
@@ -123,6 +138,88 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else if !current {
             notificationManager.stopRepeatingSound()
         }
+    }
+
+    // MARK: - Animated badge dot (CALayer on the status button)
+
+    private func showDot(color: NSColor) {
+        dotGeneration += 1
+        let dot = dotLayer ?? makeDotLayer()
+        guard let dot else { return }
+        dot.backgroundColor = color.cgColor
+
+        let appear = CABasicAnimation(keyPath: "transform.scale")
+        appear.fromValue = 0.01
+        appear.toValue = 1.0
+        appear.duration = 0.15
+        dot.add(appear, forKey: "dotAppear")
+    }
+
+    private func hideDot() {
+        guard let dot = dotLayer else {
+            statusItem.button?.image = normalIcon
+            return
+        }
+        let disappear = CABasicAnimation(keyPath: "transform.scale")
+        disappear.fromValue = 1.0
+        disappear.toValue = 0.01
+        disappear.duration = 0.12
+        disappear.fillMode = .forwards
+        disappear.isRemovedOnCompletion = false
+        dot.add(disappear, forKey: "dotDisappear")
+
+        dotGeneration += 1
+        let expected = dotGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+            guard let self, self.dotGeneration == expected else { return }
+            self.dotLayer?.removeFromSuperlayer()
+            self.dotLayer = nil
+            self.statusItem.button?.image = self.normalIcon
+        }
+    }
+
+    private func swapDotColor(to color: NSColor) {
+        guard let dot = dotLayer else { return }
+        dot.backgroundColor = color.cgColor
+
+        let scaleDown = CABasicAnimation(keyPath: "transform.scale")
+        scaleDown.fromValue = 1.0
+        scaleDown.toValue = 0.01
+        scaleDown.duration = 0.1
+
+        let scaleUp = CABasicAnimation(keyPath: "transform.scale")
+        scaleUp.fromValue = 0.01
+        scaleUp.toValue = 1.0
+        scaleUp.duration = 0.15
+        scaleUp.beginTime = 0.1
+
+        let group = CAAnimationGroup()
+        group.animations = [scaleDown, scaleUp]
+        group.duration = 0.25
+        dot.add(group, forKey: "dotSwap")
+    }
+
+    private func makeDotLayer() -> CALayer? {
+        guard let button = statusItem.button else { return nil }
+        button.wantsLayer = true
+        guard let buttonLayer = button.layer else { return nil }
+
+        let iconX = (button.bounds.width - MenuBarIcon.iconSize) / 2
+        let iconY = (button.bounds.height - MenuBarIcon.iconSize) / 2
+
+        let layer = CALayer()
+        layer.bounds = CGRect(x: 0, y: 0, width: MenuBarIcon.dotSize, height: MenuBarIcon.dotSize)
+        // NSStatusBarButton is flipped but its layer geometry matches, so the
+        // SVG's from-top Y applies directly
+        layer.position = CGPoint(
+            x: iconX + MenuBarIcon.dotCenter.x,
+            y: iconY + MenuBarIcon.dotCenter.y
+        )
+        layer.cornerRadius = MenuBarIcon.dotSize / 2
+        layer.masksToBounds = true
+        buttonLayer.addSublayer(layer)
+        dotLayer = layer
+        return layer
     }
 
     private func handleHotkey() {
