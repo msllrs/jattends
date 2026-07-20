@@ -13,6 +13,7 @@ struct JattendsApp: App {
 class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let store = SessionStore()
+    private let approvalStore = ApprovalStore()
     private var lastHasWaiting = false
 
     private let normalIcon = MenuBarIcon.buildIcon(badge: false)
@@ -50,6 +51,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         store.refreshLiveCwds()
         store.startWatching()
 
+        // In-app approvals: mirror prefs for the hook, watch for its requests
+        HookConfig.sync()
+        notificationManager.setApprovalHandler { [weak self] requestId, allow in
+            guard let self,
+                  let request = self.approvalStore.pending.first(where: { $0.requestId == requestId })
+            else { return }
+            self.approvalStore.respond(to: request, allow: allow)
+        }
+        approvalStore.onNewRequests = { [weak self] requests in
+            for request in requests {
+                self?.notificationManager.notifyApproval(request)
+            }
+            self?.notificationManager.playSoundIfEnabled()
+        }
+        approvalStore.onReload = { [weak self] in
+            self?.updateIconIfNeeded()
+        }
+        approvalStore.startWatching()
+        if UserDefaults.standard.object(forKey: "inAppApprovals") as? Bool ?? true {
+            notificationManager.requestPermission()
+        }
+
         // Force reload on wake from sleep — FSEvents can miss changes during sleep
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification,
@@ -86,7 +109,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateIconIfNeeded() {
-        let current = store.hasWaiting
+        let current = store.hasWaiting || !approvalStore.pending.isEmpty
         if current != lastHasWaiting {
             lastHasWaiting = current
             statusItem.button?.image = current ? badgeIcon : normalIcon
@@ -115,14 +138,47 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
 
+        let approvals = approvalStore.pending
         let waiting = store.waitingSessions
         let working = store.workingSessions
         let idle = store.idleSessions
 
-        if waiting.isEmpty && working.isEmpty && idle.isEmpty {
+        if approvals.isEmpty && waiting.isEmpty && working.isEmpty && idle.isEmpty {
             let item = NSMenuItem(title: "No Claude sessions", action: nil, keyEquivalent: "")
             item.isEnabled = false
             menu.addItem(item)
+        }
+
+        if !approvals.isEmpty {
+            let header = NSMenuItem(title: "Pending approvals", action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            menu.addItem(header)
+
+            for request in approvals {
+                let item = NSMenuItem(title: request.projectName, action: nil, keyEquivalent: "")
+                item.attributedTitle = makeApprovalTitle(for: request)
+
+                let submenu = NSMenu()
+                let approve = NSMenuItem(title: "Approve", action: #selector(approveRequest(_:)), keyEquivalent: "")
+                approve.target = self
+                approve.representedObject = request
+                submenu.addItem(approve)
+
+                let deny = NSMenuItem(title: "Deny", action: #selector(denyRequest(_:)), keyEquivalent: "")
+                deny.target = self
+                deny.representedObject = request
+                submenu.addItem(deny)
+
+                submenu.addItem(NSMenuItem.separator())
+                let goTo = NSMenuItem(title: "Answer in Terminal", action: #selector(focusApprovalSession(_:)), keyEquivalent: "")
+                goTo.target = self
+                goTo.representedObject = request
+                submenu.addItem(goTo)
+
+                item.submenu = submenu
+                menu.addItem(item)
+            }
+            menu.addItem(NSMenuItem.separator())
         }
 
         if !waiting.isEmpty {
@@ -254,6 +310,43 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         return result
+    }
+
+    private func makeApprovalTitle(for request: ApprovalRequest) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        result.append(NSAttributedString(string: "✱  ", attributes: [
+            .foregroundColor: NSColor.systemRed,
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+        ]))
+        result.append(NSAttributedString(string: request.projectName, attributes: [
+            .font: NSFont.menuFont(ofSize: 13),
+        ]))
+        result.append(NSAttributedString(string: "\n    \(request.summary.prefix(60))", attributes: [
+            .font: NSFont.menuFont(ofSize: 11),
+            .foregroundColor: NSColor.secondaryLabelColor,
+        ]))
+        return result
+    }
+
+    @objc private func approveRequest(_ sender: NSMenuItem) {
+        guard let request = sender.representedObject as? ApprovalRequest else { return }
+        approvalStore.respond(to: request, allow: true)
+        notificationManager.withdrawApproval(requestId: request.requestId)
+    }
+
+    @objc private func denyRequest(_ sender: NSMenuItem) {
+        guard let request = sender.representedObject as? ApprovalRequest else { return }
+        approvalStore.respond(to: request, allow: false)
+        notificationManager.withdrawApproval(requestId: request.requestId)
+    }
+
+    @objc private func focusApprovalSession(_ sender: NSMenuItem) {
+        guard let request = sender.representedObject as? ApprovalRequest,
+              let session = store.sessions.first(where: { $0.sessionId == request.sessionId })
+        else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            TerminalActivator.activate(session: session)
+        }
     }
 
     @objc private func clearAllSessions() {

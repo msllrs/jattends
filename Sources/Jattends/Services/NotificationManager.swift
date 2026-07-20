@@ -7,8 +7,12 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     private static let categoryIdentifier = "WAITING_SESSION"
     private static let focusActionIdentifier = "FOCUS_ACTION"
+    private static let approvalCategoryIdentifier = "APPROVAL_REQUEST"
+    private static let approveActionIdentifier = "APPROVE_ACTION"
+    private static let denyActionIdentifier = "DENY_ACTION"
 
     private var onFocusSession: ((SessionInfo) -> Void)?
+    private var onApprovalDecision: ((String, Bool) -> Void)?
     private var repeatTimer: Timer?
     private var repeatStartTime: Date?
     private var currentSound: NSSound?
@@ -28,12 +32,59 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
             actions: [focusAction],
             intentIdentifiers: []
         )
-        center.setNotificationCategories([category])
+
+        let approveAction = UNNotificationAction(
+            identifier: Self.approveActionIdentifier,
+            title: "Approve",
+            options: []
+        )
+        let denyAction = UNNotificationAction(
+            identifier: Self.denyActionIdentifier,
+            title: "Deny",
+            options: .destructive
+        )
+        let approvalCategory = UNNotificationCategory(
+            identifier: Self.approvalCategoryIdentifier,
+            actions: [approveAction, denyAction],
+            intentIdentifiers: []
+        )
+        center.setNotificationCategories([category, approvalCategory])
     }
 
     /// Set the callback for when a user taps the "Focus" action on a notification.
     func setFocusHandler(_ handler: @escaping (SessionInfo) -> Void) {
         onFocusSession = handler
+    }
+
+    /// Set the callback for Approve/Deny taps: (requestId, allow).
+    func setApprovalHandler(_ handler: @escaping (String, Bool) -> Void) {
+        onApprovalDecision = handler
+    }
+
+    /// Notify for a pending permission request with Approve/Deny actions.
+    /// Sent regardless of the notificationsEnabled preference only when the
+    /// in-app approvals feature itself is on — the hook is blocked waiting.
+    func notifyApproval(_ request: ApprovalRequest) {
+        let content = UNMutableNotificationContent()
+        content.title = "\(request.projectName) — approve \(request.toolName)?"
+        content.body = request.summary
+        content.categoryIdentifier = Self.approvalCategoryIdentifier
+        content.interruptionLevel = .timeSensitive
+        content.userInfo = ["requestId": request.requestId]
+
+        let notification = UNNotificationRequest(
+            identifier: "approval-\(request.requestId)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(notification)
+    }
+
+    /// Remove the notification for a request that was answered or expired.
+    func withdrawApproval(requestId: String) {
+        let center = UNUserNotificationCenter.current()
+        center.removeDeliveredNotifications(withIdentifiers: ["approval-\(requestId)"])
+        center.removePendingNotificationRequests(withIdentifiers: ["approval-\(requestId)"])
     }
 
     /// Request notification permission from the user. Call when they enable notifications in prefs.
@@ -129,6 +180,25 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
+        if response.notification.request.content.categoryIdentifier == Self.approvalCategoryIdentifier {
+            if let requestId = response.notification.request.content.userInfo["requestId"] as? String {
+                switch response.actionIdentifier {
+                case Self.approveActionIdentifier:
+                    DispatchQueue.main.async { [weak self] in
+                        self?.onApprovalDecision?(requestId, true)
+                    }
+                case Self.denyActionIdentifier:
+                    DispatchQueue.main.async { [weak self] in
+                        self?.onApprovalDecision?(requestId, false)
+                    }
+                default:
+                    break // default click: leave the request pending in the menu
+                }
+            }
+            completionHandler()
+            return
+        }
+
         if response.actionIdentifier == Self.focusActionIdentifier ||
            response.actionIdentifier == UNNotificationDefaultActionIdentifier {
             let userInfo = response.notification.request.content.userInfo

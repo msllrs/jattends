@@ -9,6 +9,8 @@ struct PreferencesView: View {
     @AppStorage("soundRepeat") private var soundRepeat = false
     @AppStorage("soundRepeatTimeout") private var soundRepeatTimeout = 120.0
     @AppStorage("autoClearMinutes") private var autoClearMinutes = 0
+    @AppStorage("inAppApprovals") private var inAppApprovals = true
+    @AppStorage("approvalWaitSeconds") private var approvalWaitSeconds = HookConfig.defaultApprovalWaitSeconds
     @AppStorage("hotkeyEnabled") private var hotkeyEnabled = false
     @AppStorage("hotkeyKeyCode") private var hotkeyKeyCode = HotkeyManager.defaultKeyCode
     @AppStorage("hotkeyModifiers") private var hotkeyModifiers = HotkeyManager.defaultModifiers
@@ -48,6 +50,32 @@ struct PreferencesView: View {
                 Text("Notifications")
             } footer: {
                 Text("Show a macOS notification when a session needs attention.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("Approve permission requests from Jattends", isOn: $inAppApprovals)
+                    .onChange(of: inAppApprovals) { _, newValue in
+                        if newValue {
+                            NotificationManager.shared.requestPermission()
+                        }
+                        HookConfig.sync()
+                    }
+
+                Picker("Wait for a decision", selection: $approvalWaitSeconds) {
+                    Text("15 seconds").tag(15.0)
+                    Text("30 seconds").tag(30.0)
+                    Text("45 seconds").tag(45.0)
+                    Text("60 seconds").tag(60.0)
+                }
+                .disabled(!inAppApprovals)
+                .onChange(of: approvalWaitSeconds) { _, _ in
+                    HookConfig.sync()
+                }
+            } header: {
+                Text("Approvals")
+            } footer: {
+                Text("When Claude asks for permission, show it here with Approve/Deny — no window switching. If you don't answer in time, the prompt appears in the terminal as usual.")
                     .foregroundStyle(.secondary)
             }
 
