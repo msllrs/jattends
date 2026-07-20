@@ -13,6 +13,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     private var onFocusSession: ((SessionInfo) -> Void)?
     private var onApprovalDecision: ((String, Bool) -> Void)?
+    private var onApprovalFocus: ((String) -> Void)?
     private var repeatTimer: Timer?
     private var repeatStartTime: Date?
     private var currentSound: NSSound?
@@ -61,6 +62,12 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         onApprovalDecision = handler
     }
 
+    /// Set the callback for clicking the body of an approval notification:
+    /// (sessionId) — jump to the terminal to look before answering.
+    func setApprovalFocusHandler(_ handler: @escaping (String) -> Void) {
+        onApprovalFocus = handler
+    }
+
     /// Notify for a pending permission request with Approve/Deny actions.
     /// Gated on the master notifications toggle plus the approvals sub-toggle;
     /// with either off, pending approvals appear only in the menu.
@@ -74,7 +81,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         content.body = request.summary
         content.categoryIdentifier = Self.approvalCategoryIdentifier
         content.interruptionLevel = .timeSensitive
-        content.userInfo = ["requestId": request.requestId]
+        content.userInfo = ["requestId": request.requestId, "sessionId": request.sessionId]
 
         let notification = UNNotificationRequest(
             identifier: "approval-\(request.requestId)",
@@ -82,6 +89,16 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
             trigger: nil
         )
         UNUserNotificationCenter.current().add(notification)
+    }
+
+    /// App-health warning: our hooks were removed from Claude Code settings.
+    /// Bypasses the notification toggles — without hooks the app is blind.
+    func notifyHooksMissing() {
+        let content = UNMutableNotificationContent()
+        content.title = "Jattends hooks were removed"
+        content.body = "Another tool changed ~/.claude/settings.json. Run scripts/install.sh to restore session tracking."
+        let request = UNNotificationRequest(identifier: "hooks-missing", content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
     }
 
     /// Remove the notification for a request that was answered or expired.
@@ -188,7 +205,8 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         if response.notification.request.content.categoryIdentifier == Self.approvalCategoryIdentifier {
-            if let requestId = response.notification.request.content.userInfo["requestId"] as? String {
+            let userInfo = response.notification.request.content.userInfo
+            if let requestId = userInfo["requestId"] as? String {
                 switch response.actionIdentifier {
                 case Self.approveActionIdentifier:
                     DispatchQueue.main.async { [weak self] in
@@ -198,8 +216,15 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
                     DispatchQueue.main.async { [weak self] in
                         self?.onApprovalDecision?(requestId, false)
                     }
+                case UNNotificationDefaultActionIdentifier:
+                    // Body click: jump to the terminal to look before answering
+                    if let sessionId = userInfo["sessionId"] as? String {
+                        DispatchQueue.main.async { [weak self] in
+                            self?.onApprovalFocus?(sessionId)
+                        }
+                    }
                 default:
-                    break // default click: leave the request pending in the menu
+                    break
                 }
             }
             completionHandler()
