@@ -287,25 +287,42 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     ]
 
     private func makeAttributedTitle(for session: SessionInfo) -> NSAttributedString {
-        let result = NSMutableAttributedString()
+        let detail = session.statusDetail ?? (session.status.needsAttention ? session.status.label : nil)
+        return Self.makeMenuItemTitle(
+            symbol: Self.statusSymbols[session.status] ?? "○",
+            color: Self.statusColors[session.status] ?? .secondaryLabelColor,
+            title: session.projectName,
+            detail: detail
+        )
+    }
 
-        let symbol = Self.statusSymbols[session.status] ?? "○"
-        let color = Self.statusColors[session.status] ?? .secondaryLabelColor
-        result.append(NSAttributedString(string: "\(symbol)  ", attributes: [
+    /// Two-line menu item title: the status symbol shares the title's line,
+    /// and a tab stop puts the title and the detail line on the same left
+    /// edge (spaces can't — the symbol and detail use different fonts).
+    static func makeMenuItemTitle(
+        symbol: String, color: NSColor, title: String, detail: String?
+    ) -> NSAttributedString {
+        let textColumn: CGFloat = 18
+        let style = NSMutableParagraphStyle()
+        style.tabStops = [NSTextTab(textAlignment: .left, location: textColumn)]
+        style.headIndent = textColumn
+
+        let result = NSMutableAttributedString()
+        result.append(NSAttributedString(string: "\(symbol)\t", attributes: [
             .foregroundColor: color,
             .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+            .paragraphStyle: style,
         ]))
-
-        result.append(NSAttributedString(string: session.projectName, attributes: [
+        result.append(NSAttributedString(string: title, attributes: [
             .font: NSFont.menuFont(ofSize: 13),
+            .paragraphStyle: style,
         ]))
 
-        // Secondary line: what the session is doing / why it needs attention
-        let detail = session.statusDetail ?? (session.status.needsAttention ? session.status.label : nil)
         if let detail, !detail.isEmpty {
-            result.append(NSAttributedString(string: "\n    \(detail.prefix(60))", attributes: [
+            result.append(NSAttributedString(string: "\n\t\(detail.prefix(60))", attributes: [
                 .font: NSFont.menuFont(ofSize: 11),
                 .foregroundColor: NSColor.secondaryLabelColor,
+                .paragraphStyle: style,
             ]))
         }
 
@@ -313,19 +330,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func makeApprovalTitle(for request: ApprovalRequest) -> NSAttributedString {
-        let result = NSMutableAttributedString()
-        result.append(NSAttributedString(string: "✱  ", attributes: [
-            .foregroundColor: NSColor.systemRed,
-            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
-        ]))
-        result.append(NSAttributedString(string: request.projectName, attributes: [
-            .font: NSFont.menuFont(ofSize: 13),
-        ]))
-        result.append(NSAttributedString(string: "\n    \(request.summary.prefix(60))", attributes: [
-            .font: NSFont.menuFont(ofSize: 11),
-            .foregroundColor: NSColor.secondaryLabelColor,
-        ]))
-        return result
+        Self.makeMenuItemTitle(
+            symbol: "✱",
+            color: .systemRed,
+            title: request.projectName,
+            detail: request.summary
+        )
     }
 
     @objc private func approveRequest(_ sender: NSMenuItem) {
