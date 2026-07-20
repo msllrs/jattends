@@ -1,16 +1,30 @@
 import Foundation
 
-enum SessionStatus: String, Codable, Comparable {
-    case waiting   // Needs user attention (idle prompt, tool approval, etc.)
-    case active    // Claude is working
-    case idle      // Session exists but nothing happening
+enum SessionStatus: String, Codable, Comparable, CaseIterable {
+    case approval    // Blocked on a permission decision
+    case waiting     // Waiting for user input or an answer
+    case error       // Turn failed (rate limit, API error, ...)
+    case working     // Claude is processing
+    case compacting  // Context compaction in progress
+    case idle        // Session exists but nothing happening
 
-    /// Sort order: waiting first, then active, then idle.
+    /// Whether this status needs the user's attention (badge + notification).
+    var needsAttention: Bool {
+        switch self {
+        case .approval, .waiting, .error: return true
+        case .working, .compacting, .idle: return false
+        }
+    }
+
+    /// Sort order: attention states first, then activity, then idle.
     private var sortOrder: Int {
         switch self {
-        case .waiting: return 0
-        case .active: return 1
-        case .idle: return 2
+        case .approval: return 0
+        case .waiting: return 1
+        case .error: return 2
+        case .working: return 3
+        case .compacting: return 4
+        case .idle: return 5
         }
     }
 
@@ -20,17 +34,31 @@ enum SessionStatus: String, Codable, Comparable {
 
     var label: String {
         switch self {
+        case .approval: return "Needs approval"
         case .waiting: return "Waiting"
-        case .active: return "Working"
+        case .error: return "Error"
+        case .working: return "Working"
+        case .compacting: return "Compacting"
         case .idle: return "Ready"
         }
     }
 
     var iconColor: String {
         switch self {
+        case .approval: return "red"
         case .waiting: return "orange"
-        case .active: return "green"
+        case .error: return "red"
+        case .working: return "green"
+        case .compacting: return "blue"
         case .idle: return "gray"
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        switch raw {
+        case "active": self = .working // legacy hook value
+        default: self = SessionStatus(rawValue: raw) ?? .idle
         }
     }
 }

@@ -6,7 +6,7 @@ final class SessionStore {
     private(set) var sessions: [SessionInfo] = []
     private(set) var newlyWaitingSessions: [SessionInfo] = []
 
-    /// Consume newly-waiting sessions so they aren't re-processed.
+    /// Consume newly-attention-needing sessions so they aren't re-processed.
     func consumeNewlyWaiting() -> [SessionInfo] {
         let result = newlyWaitingSessions
         newlyWaitingSessions = []
@@ -26,9 +26,19 @@ final class SessionStore {
         return dir
     }()
 
-    /// Only sessions needing attention.
+    /// Only sessions needing attention (approval, waiting, error).
     var waitingSessions: [SessionInfo] {
-        sessions.filter { $0.status == .waiting }
+        sessions.filter { $0.status.needsAttention }
+    }
+
+    /// Sessions Claude is actively working in.
+    var workingSessions: [SessionInfo] {
+        sessions.filter { $0.status == .working || $0.status == .compacting }
+    }
+
+    /// Sessions with nothing happening.
+    var idleSessions: [SessionInfo] {
+        sessions.filter { $0.status == .idle }
     }
 
     var waitingCount: Int {
@@ -132,11 +142,14 @@ final class SessionStore {
         var loaded: [(URL, SessionInfo)] = []
         for file in files {
             guard let data = try? Data(contentsOf: file),
-                  let session = try? decoder.decode(SessionInfo.self, from: data)
+                  var session = try? decoder.decode(SessionInfo.self, from: data)
             else {
                 // Skip unreadable files (may be mid-write) — don't delete
                 continue
             }
+            // Normalize stale "working" to idle — hook events flow constantly
+            // while Claude is genuinely active
+            session.status = session.effectiveStatus
             if session.isStale {
                 try? fm.removeItem(at: file)
                 continue
@@ -156,9 +169,9 @@ final class SessionStore {
                 try? fm.removeItem(at: file)
                 continue
             }
-            // Auto-clear waiting sessions past the configured timeout
+            // Auto-clear attention-needing sessions past the configured timeout
             if let interval = autoClearInterval,
-               session.status == .waiting,
+               session.status.needsAttention,
                Date().timeIntervalSince(session.updatedAt) > interval {
                 try? fm.removeItem(at: file)
                 continue
@@ -192,14 +205,15 @@ final class SessionStore {
         }
         deduped.append(contentsOf: byClaudePid.values.map(\.1))
 
-        // Sort: waiting first, then active, then idle; within each group sort by updatedAt descending
+        // Sort: attention states first, then working, then idle; within each
+        // group sort by updatedAt descending
         sessions = deduped.sorted { a, b in
             if a.status != b.status { return a.status < b.status }
             return a.updatedAt > b.updatedAt
         }
 
-        // Track newly-waiting sessions (those that just transitioned to waiting)
-        let currentWaitingIds = Set(sessions.filter { $0.status == .waiting }.map(\.sessionId))
+        // Track sessions that just transitioned into needing attention
+        let currentWaitingIds = Set(sessions.filter { $0.status.needsAttention }.map(\.sessionId))
         let newIds = currentWaitingIds.subtracting(previousWaitingIds)
         newlyWaitingSessions = sessions.filter { newIds.contains($0.sessionId) }
         previousWaitingIds = currentWaitingIds
