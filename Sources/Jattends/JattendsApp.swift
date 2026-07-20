@@ -17,6 +17,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var dotUrgency: BadgeDotModel.Urgency?
     private var dotLayer: CALayer?
     private var dotGeneration = 0
+    private var hooksHealthy = true
+    private var hookWarningNotified = false
 
     private let normalIcon = MenuBarIcon.buildIcon(badge: false)
     private let badgeIcon = MenuBarIcon.buildIcon(badge: true)
@@ -61,6 +63,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             else { return }
             self.approvalStore.respond(to: request, allow: allow)
         }
+        notificationManager.setApprovalFocusHandler { [weak self] sessionId in
+            guard let session = self?.store.sessions.first(where: { $0.sessionId == sessionId })
+            else { return }
+            TerminalActivator.activate(session: session)
+        }
         approvalStore.onNewRequests = { [weak self] requests in
             for request in requests {
                 self?.notificationManager.notifyApproval(request)
@@ -88,11 +95,52 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Safety-net periodic reload every 10s to catch missed FSEvents and clean dead PIDs
         // Also runs --scan to discover untracked claude processes
         scanForSessions()
+        checkHookHealth()
         Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             self?.scanForSessions()
             self?.store.refreshLiveCwds()
             self?.store.forceReload()
+            self?.checkHookHealth()
         }
+    }
+
+    /// Insurance against other tools rewriting ~/.claude/settings.json and
+    /// silently stripping our hooks — the app would otherwise just go blind.
+    private func checkHookHealth() {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let hookPath = home.appendingPathComponent(".claude/hooks/jattends-hook.py").path
+
+        var healthy = FileManager.default.isExecutableFile(atPath: hookPath)
+        if healthy {
+            let settingsURL = home.appendingPathComponent(".claude/settings.json")
+            if let data = try? Data(contentsOf: settingsURL),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let hooks = json["hooks"] as? [String: Any] {
+                for event in ["SessionStart", "Stop", "PermissionRequest"] {
+                    let matchers = hooks[event] as? [[String: Any]] ?? []
+                    let present = matchers.contains { matcher in
+                        (matcher["hooks"] as? [[String: Any]] ?? []).contains {
+                            ($0["command"] as? String ?? "").contains("jattends-hook")
+                        }
+                    }
+                    if !present {
+                        healthy = false
+                        break
+                    }
+                }
+            } else {
+                healthy = false
+            }
+        }
+
+        if !healthy && hooksHealthy && !hookWarningNotified {
+            hookWarningNotified = true
+            notificationManager.notifyHooksMissing()
+        }
+        if healthy {
+            hookWarningNotified = false
+        }
+        hooksHealthy = healthy
     }
 
     private func scanForSessions() {
@@ -252,6 +300,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
 
+        if !hooksHealthy {
+            let warning = NSMenuItem(title: "Claude hooks missing", action: nil, keyEquivalent: "")
+            warning.view = MenuRowView(text: Self.makeMenuItemTitle(
+                symbol: "⚠︎",
+                color: .systemYellow,
+                title: "Claude hooks missing",
+                detail: "Run scripts/install.sh to restore tracking"
+            ))
+            menu.addItem(warning)
+            menu.addItem(NSMenuItem.separator())
+        }
+
         let approvals = approvalStore.pending
         let waiting = store.waitingSessions
         let working = store.workingSessions
@@ -408,16 +468,32 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     ]
 
     private func makeAttributedTitle(for session: SessionInfo) -> NSAttributedString {
-        var detail = session.statusDetail ?? (session.status.needsAttention ? session.status.label : nil)
-        if let count = session.subagentCount, count > 0 {
-            let agents = "\(count) agent\(count == 1 ? "" : "s")"
-            detail = detail.map { "⑂ \(agents) · \($0)" } ?? "⑂ Running \(agents)"
+        var parts: [String] = []
+
+        // Elapsed turn time while Claude is actually going
+        if session.status == .working || session.status == .compacting,
+           let started = session.turnStartedAt {
+            parts.append(SessionInfo.shortDuration(since: started))
         }
+
+        if let count = session.subagentCount, count > 0 {
+            parts.append("⑂ \(count) agent\(count == 1 ? "" : "s")")
+        }
+
+        // What it's doing; for attention, why; for idle, what it was about
+        if let detail = session.statusDetail {
+            parts.append(detail)
+        } else if session.status.needsAttention {
+            parts.append(session.status.label)
+        } else if let prompt = session.lastPrompt {
+            parts.append(prompt)
+        }
+
         return Self.makeMenuItemTitle(
             symbol: Self.statusSymbols[session.status] ?? "○",
             color: Self.statusColors[session.status] ?? .secondaryLabelColor,
             title: session.projectName,
-            detail: detail
+            detail: parts.isEmpty ? nil : parts.joined(separator: " · ")
         )
     }
 

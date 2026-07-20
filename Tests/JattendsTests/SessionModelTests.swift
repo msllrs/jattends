@@ -58,6 +58,14 @@ final class SessionInfoTests: XCTestCase {
         XCTAssertEqual(session.lastPrompt, "fix the bug")
     }
 
+    func testShortDurationFormatting() {
+        let now = Date()
+        XCTAssertEqual(SessionInfo.shortDuration(since: now.addingTimeInterval(-42), now: now), "42s")
+        XCTAssertEqual(SessionInfo.shortDuration(since: now.addingTimeInterval(-6 * 60), now: now), "6m")
+        XCTAssertEqual(SessionInfo.shortDuration(since: now.addingTimeInterval(-(72 * 60)), now: now), "1h 12m")
+        XCTAssertEqual(SessionInfo.shortDuration(since: now.addingTimeInterval(60), now: now), "0s")
+    }
+
     func testEffectiveStatusDowngradesStaleWorking() {
         let stale = SessionInfo(
             sessionId: "a", cwd: "/tmp", status: .working,
