@@ -33,6 +33,21 @@ final class SessionStore {
         return dir
     }()
 
+    private static let labelsDirectory: URL = {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/jattends/labels")
+    }()
+
+    /// Session display name written by the hook's statusline bridge.
+    static func label(forSessionId sessionId: String) -> String? {
+        let content = try? String(
+            contentsOf: labelsDirectory.appendingPathComponent(sessionId),
+            encoding: .utf8)
+        guard let name = content?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !name.isEmpty else { return nil }
+        return name
+    }
+
     /// Hide a session until its next activity: tombstone it so the process
     /// scan won't resurrect it, then remove its file. Any real hook event
     /// clears the tombstone and the session reappears.
@@ -179,6 +194,7 @@ final class SessionStore {
             // Normalize stale "working" to idle — hook events flow constantly
             // while Claude is genuinely active
             session.status = session.effectiveStatus
+            session.sessionName = Self.label(forSessionId: session.sessionId)
             if session.isStale {
                 try? fm.removeItem(at: file)
                 continue

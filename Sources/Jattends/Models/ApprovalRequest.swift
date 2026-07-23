@@ -6,6 +6,7 @@ struct ApprovalRequest: Codable, Identifiable {
     let requestId: String
     let sessionId: String
     let cwd: String
+    let sessionName: String?
     let toolName: String
     let summary: String
     let createdAt: Date
@@ -14,6 +15,12 @@ struct ApprovalRequest: Codable, Identifiable {
 
     var projectName: String {
         URL(fileURLWithPath: cwd).lastPathComponent
+    }
+
+    /// Session name when Claude Code has one, else the project folder name.
+    var displayName: String {
+        if let sessionName, !sessionName.isEmpty { return sessionName }
+        return projectName
     }
 
     /// Requests older than this are abandoned (the hook gave up waiting).

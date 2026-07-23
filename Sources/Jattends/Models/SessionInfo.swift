@@ -4,6 +4,10 @@ struct SessionInfo: Codable, Identifiable {
     let sessionId: String
     let cwd: String
     var status: SessionStatus
+    /// Claude Code's session display name (auto topic title or /rename name),
+    /// injected by SessionStore from the labels/ sidecar — not part of the
+    /// session JSON itself.
+    var sessionName: String?
     let terminalApp: String?
     let terminalPid: Int?
     let terminalTty: String?
@@ -20,6 +24,7 @@ struct SessionInfo: Codable, Identifiable {
         sessionId: String,
         cwd: String,
         status: SessionStatus,
+        sessionName: String? = nil,
         terminalApp: String? = nil,
         terminalPid: Int? = nil,
         terminalTty: String? = nil,
@@ -35,6 +40,7 @@ struct SessionInfo: Codable, Identifiable {
         self.sessionId = sessionId
         self.cwd = cwd
         self.status = status
+        self.sessionName = sessionName
         self.terminalApp = terminalApp
         self.terminalPid = terminalPid
         self.terminalTty = terminalTty
@@ -62,6 +68,13 @@ struct SessionInfo: Codable, Identifiable {
     /// Derive a short project name from the working directory.
     var projectName: String {
         URL(fileURLWithPath: cwd).lastPathComponent
+    }
+
+    /// Session name when Claude Code has one, else the project folder name.
+    /// Distinguishes parallel sessions that share a working directory.
+    var displayName: String {
+        if let sessionName, !sessionName.isEmpty { return sessionName }
+        return projectName
     }
 
     /// Whether this session is stale (older than 24 hours).

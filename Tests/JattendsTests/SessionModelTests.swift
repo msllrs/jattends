@@ -58,6 +58,23 @@ final class SessionInfoTests: XCTestCase {
         XCTAssertEqual(session.lastPrompt, "fix the bug")
     }
 
+    func testDisplayNamePrefersSessionName() {
+        let session = SessionInfo(sessionId: "abc", cwd: "/tmp/proj", status: .idle,
+                                  sessionName: "fix scroll overlay gaps")
+        XCTAssertEqual(session.displayName, "fix scroll overlay gaps")
+        XCTAssertEqual(session.projectName, "proj")
+    }
+
+    func testDisplayNameFallsBackToProjectName() {
+        XCTAssertEqual(
+            SessionInfo(sessionId: "abc", cwd: "/tmp/proj", status: .idle).displayName,
+            "proj")
+        XCTAssertEqual(
+            SessionInfo(sessionId: "abc", cwd: "/tmp/proj", status: .idle,
+                        sessionName: "").displayName,
+            "proj")
+    }
+
     func testShortDurationFormatting() {
         let now = Date()
         XCTAssertEqual(SessionInfo.shortDuration(since: now.addingTimeInterval(-42), now: now), "42s")

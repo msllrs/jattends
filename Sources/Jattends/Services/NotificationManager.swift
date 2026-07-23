@@ -77,7 +77,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
               defaults.object(forKey: "notifyApprovals") as? Bool ?? true
         else { return }
         let content = UNMutableNotificationContent()
-        content.title = "\(request.projectName) — approve \(request.toolName)?"
+        content.title = "\(request.displayName) — approve \(request.toolName)?"
         content.body = request.summary
         content.categoryIdentifier = Self.approvalCategoryIdentifier
         content.interruptionLevel = .timeSensitive
@@ -177,7 +177,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     private func sendNotification(for session: SessionInfo) {
         let content = UNMutableNotificationContent()
-        content.title = "\(session.projectName) — \(session.status.label)"
+        content.title = "\(session.displayName) — \(session.status.label)"
         content.body = session.statusDetail ?? session.lastPrompt ?? "Needs attention"
         content.categoryIdentifier = Self.categoryIdentifier
         content.userInfo = [

@@ -351,7 +351,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(header)
 
             for request in approvals {
-                let item = NSMenuItem(title: request.projectName, action: nil, keyEquivalent: "")
+                let item = NSMenuItem(title: request.displayName, action: nil, keyEquivalent: "")
                 item.view = MenuRowView(text: makeApprovalTitle(for: request), showsChevron: true)
 
                 let submenu = NSMenu()
@@ -455,13 +455,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Add a click-to-focus item plus an Option-alternate dismiss item per session.
     private func addSessionItems(_ sessions: [SessionInfo], to menu: NSMenu) {
         for session in sessions {
-            let item = NSMenuItem(title: session.projectName, action: #selector(sessionClicked(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: session.displayName, action: #selector(sessionClicked(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = session
             item.view = MenuRowView(text: makeAttributedTitle(for: session))
             menu.addItem(item)
 
-            let alt = NSMenuItem(title: session.projectName, action: #selector(dismissSession(_:)), keyEquivalent: "")
+            let alt = NSMenuItem(title: session.displayName, action: #selector(dismissSession(_:)), keyEquivalent: "")
             alt.target = self
             alt.representedObject = session
             alt.isAlternate = true
@@ -469,7 +469,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             alt.view = MenuRowView(text: Self.makeMenuItemTitle(
                 symbol: "✕",
                 color: .secondaryLabelColor,
-                title: session.projectName,
+                title: session.displayName,
                 detail: "Hide until next activity"
             ))
             menu.addItem(alt)
@@ -496,6 +496,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func makeAttributedTitle(for session: SessionInfo) -> NSAttributedString {
         var parts: [String] = []
 
+        // When the session name takes the title line, keep the project
+        // visible in the detail line — several sessions may share it.
+        if session.sessionName != nil {
+            parts.append(session.projectName)
+        }
+
         // Elapsed turn time while Claude is actually going
         if session.status == .working || session.status == .compacting,
            let started = session.turnStartedAt {
@@ -518,7 +524,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return Self.makeMenuItemTitle(
             symbol: Self.statusSymbols[session.status] ?? "○",
             color: Self.statusColors[session.status] ?? .secondaryLabelColor,
-            title: session.projectName,
+            title: session.displayName,
             detail: parts.isEmpty ? nil : parts.joined(separator: " · ")
         )
     }
@@ -558,11 +564,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func makeApprovalTitle(for request: ApprovalRequest) -> NSAttributedString {
-        Self.makeMenuItemTitle(
+        var detail = request.summary
+        if request.sessionName != nil {
+            detail = "\(request.projectName) · \(detail)"
+        }
+        return Self.makeMenuItemTitle(
             symbol: "✱",
             color: Self.attentionColor,
-            title: request.projectName,
-            detail: request.summary
+            title: request.displayName,
+            detail: detail
         )
     }
 
