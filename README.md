@@ -24,6 +24,7 @@ Jattends uses Claude Code [hooks](https://docs.anthropic.com/en/docs/claude-code
 
 - **Approve from the menu bar** — when Claude asks for permission, answer Approve/Deny from a notification or the menu; no window switching. If you don't answer in time, the prompt appears in the terminal as usual
 - **Live session states** — needs approval, waiting, error, working (with what it's doing: "Running: npm test", "Editing: Store.swift"), compacting, ready
+- **Session names** — rows title with Claude Code's session name ("fix scroll overlay gaps") instead of just the folder name, so ten sessions in one repo stay tellable apart (needs the optional [statusline bridge](#session-names-optional))
 - **Menubar badge** — see at a glance when any session needs you
 - **Terminal focus** — click a session to raise the exact window/tab (OSC 2 title tagging, so two sessions in the same project resolve correctly)
 - **Dismiss** — Option+click a session to dismiss it, or Option+click the header to clear all
@@ -34,6 +35,17 @@ Jattends uses Claude Code [hooks](https://docs.anthropic.com/en/docs/claude-code
 - **Multi-terminal** — Ghostty, Terminal.app, iTerm2, kitty, Warp, Alacritty, WezTerm, Hyper, VS Code
 
 In-app approvals are on by default. Notifications, sound, shortcut, and auto-clear are off by default. Configure in Settings (menubar icon → Settings).
+
+## Session names (optional)
+
+Claude Code only exposes a session's display name (the auto-generated topic title or your `/rename` name) to [statusLine](https://code.claude.com/docs/en/statusline) commands, not to hooks mid-session. If you use a statusline script, add this line to it and Jattends will title rows with the session name:
+
+```bash
+# statusline scripts receive the payload on stdin; $input is what you already read with `cat`
+echo "$input" | ~/.claude/hooks/jattends-hook.py --statusline >/dev/null 2>&1 &
+```
+
+Without the bridge, rows fall back to the project folder name as before.
 
 ## Raycast Extension
 

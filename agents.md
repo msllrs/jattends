@@ -120,12 +120,25 @@ Reader conventions both implementations follow:
 - Delete files that are stale (>24h), whose `terminalPid`/`claudePid` are dead, or (no `claudePid`) whose cwd has no live claude process
 - Dedupe by `claudePid`, keeping higher-priority status then most recent
 - Show `working`/`compacting` sessions older than 5 minutes as `idle`
+- Read `~/.claude/jattends/labels/{sessionId}` (plain text, see below) and title the session with it when present, keeping the cwd basename visible in the detail/subtitle
+
+## Session labels
+
+`~/.claude/jattends/labels/{sessionId}` holds the session's Claude Code display name (auto-generated topic title, `/rename` name, or `--agent` name) as plain text — this is what distinguishes parallel sessions sharing one cwd. It's a sidecar file rather than a session-JSON field so its writer never races the hook's read-modify-write of the session file.
+
+Writers: the statusline bridge (`jattends-hook.py --statusline`, fed the statusLine payload by the user's statusline command — the only live source of `session_name`) and `SessionStart`'s optional `session_title`. `SessionEnd` removes the label; `--scan` prunes labels without a session file. Approval requests snapshot it as `sessionName`.
+
+Statusline bridge hookup (one line in the user's statusline script, backgrounded so it never delays rendering):
+
+```bash
+echo "$input" | ~/.claude/hooks/jattends-hook.py --statusline >/dev/null 2>&1 &
+```
 
 ## Hook event → status mapping
 
 | Event | Status | Notes |
 |-------|--------|-------|
-| `SessionStart` | `idle` (`working` if `source=compact`) | Session open, waiting for first prompt |
+| `SessionStart` | `idle` (`working` if `source=compact`) | Session open, waiting for first prompt; writes `session_title` to the label file if present |
 | `UserPromptSubmit` | `working` | Captures `lastPrompt` (first line, 120 chars) |
 | `PostToolUse` | `working` | Detail: "Running: npm test", "Editing: Store.swift", ... |
 | `PermissionRequest` | `approval` | May block for an in-app decision (see above) |
@@ -137,6 +150,6 @@ Reader conventions both implementations follow:
 | `StopFailure` | `error` | Detail carries the error type (rate_limit, ...) |
 | `PreCompact` / `PostCompact` | `compacting` / `working` | |
 | `SubagentStart` / `SubagentStop` | `working` | Marker file per running subagent in `~/.claude/jattends/subagents/<session>/<agent_id>`; count written to the session file as `subagentCount`. Skipped if no `agent_id`. SessionEnd clears markers; scan prunes orphaned/12h-stale ones |
-| `SessionEnd` | *(deleted)* | Session file removed |
+| `SessionEnd` | *(deleted)* | Session file, subagent markers, and label removed |
 
 Registered in `~/.claude/settings.json` by `install.sh` with a 10s timeout per event (90s for `PermissionRequest`).
