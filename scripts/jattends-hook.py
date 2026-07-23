@@ -104,6 +104,23 @@ def find_process_info(start_pid, procs):
     return claude_pid, tty, terminal_pid, terminal_app
 
 
+def tty_for_pid(pid):
+    """The pty a process is attached to, via its open stdio fds — agent
+    sessions run on daemon-created ptys that ps won't report as a
+    controlling tty, but escape sequences written to them still reach the
+    window displaying the session."""
+    try:
+        out = subprocess.check_output(
+            ["lsof", "-a", "-d", "0,1,2", "-p", str(pid), "-Fn"],
+            text=True, stderr=subprocess.DEVNULL)
+    except (subprocess.CalledProcessError, OSError):
+        return None
+    for line in out.splitlines():
+        if line.startswith("n/dev/ttys"):
+            return line[1:]
+    return None
+
+
 def app_running(procs):
     # Test/debug override: JATTENDS_APP_RUNNING=0|1
     override = os.environ.get("JATTENDS_APP_RUNNING")
@@ -274,6 +291,10 @@ def register_statusline_session(d):
         session["terminalTty"] = tty
         session["terminalPid"] = term_pid
         session["terminalApp"] = term_app or "unknown"
+    # Daemon ptys don't show as a controlling tty in ps — recover them from
+    # the claude process's open fds so title-marker activation still works.
+    if session.get("claudePid") and not session.get("terminalTty"):
+        session["terminalTty"] = tty_for_pid(session["claudePid"])
 
     if not session.get("lastPrompt"):
         prompt = first_prompt_from_transcript(d.get("transcript_path"))
@@ -573,6 +594,10 @@ def handle_event():
         session["terminalPid"] = term_pid or session.get("terminalPid")
         session["terminalApp"] = (term_app or session.get("terminalApp")
                                   or os.environ.get("TERM_PROGRAM") or "unknown")
+        # Daemon ptys don't show as a controlling tty in ps — recover them
+        # from the claude process's open fds (title-marker activation).
+        if session["claudePid"] and not session["terminalTty"]:
+            session["terminalTty"] = tty_for_pid(session["claudePid"])
 
     # Any real hook event is activity — undo a "hide until next activity"
     clear_tombstones(session_id, session.get("claudePid"))

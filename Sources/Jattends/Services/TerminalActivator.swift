@@ -54,7 +54,7 @@ enum TerminalActivator {
         // Most precise: tag the session's tty with a unique window title via
         // OSC 2, raise the window carrying it, then restore the title. Finds
         // the exact tab even with several sessions in the same project.
-        if let pid = session.terminalPid, activateByTitleMarker(pid: pid, session: session) {
+        if activateByTitleMarker(session: session) {
             log("  -> title marker matched")
             return
         }
@@ -143,8 +143,10 @@ enum TerminalActivator {
     // MARK: - OSC 2 title-marker approach
 
     /// Write a unique title to the session's tty, then raise the window whose
-    /// AXTitle contains it. Works with any terminal that honors OSC 2.
-    private static func activateByTitleMarker(pid: Int, session: SessionInfo) -> Bool {
+    /// AXTitle contains it. Works with any terminal that honors OSC 2 —
+    /// including agent sessions, whose daemon-created pty forwards the escape
+    /// to whichever terminal window displays them.
+    private static func activateByTitleMarker(session: SessionInfo) -> Bool {
         guard AXIsProcessTrusted(),
               let tty = session.terminalTty, tty.hasPrefix("/dev/")
         else { return false }
@@ -156,15 +158,31 @@ enum TerminalActivator {
         // Give the terminal a moment to process the escape sequence
         usleep(120_000)
 
-        let appElement = AXUIElementCreateApplication(pid_t(pid))
-        var windowsRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef) == .success,
-              let windows = windowsRef as? [AXUIElement]
-        else { return false }
+        // Known terminal PID: scan just that app. Agent sessions have none —
+        // scan every running terminal app for the marker instead.
+        let candidatePids: [Int]
+        if let pid = session.terminalPid {
+            candidatePids = [pid]
+        } else {
+            candidatePids = NSWorkspace.shared.runningApplications
+                .filter { app in
+                    guard let name = app.localizedName else { return false }
+                    return knownTerminalAppNames.contains(name)
+                }
+                .map { Int($0.processIdentifier) }
+        }
 
-        for window in windows {
-            if let title = axStringAttribute(window, kAXTitleAttribute), title.contains(marker) {
-                return raiseWindowAndActivate(window: window, pid: pid)
+        for pid in candidatePids {
+            let appElement = AXUIElementCreateApplication(pid_t(pid))
+            var windowsRef: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+                  let windows = windowsRef as? [AXUIElement]
+            else { continue }
+
+            for window in windows {
+                if let title = axStringAttribute(window, kAXTitleAttribute), title.contains(marker) {
+                    return raiseWindowAndActivate(window: window, pid: pid)
+                }
             }
         }
         return false

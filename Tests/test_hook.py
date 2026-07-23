@@ -385,6 +385,23 @@ class StatuslineTrackingTests(HookTestCase):
         self.fire_statusline({"session_id": "s1", "cwd": "/tmp/changed"})
         self.assertEqual(self.read_session()["cwd"], "/tmp/changed")
 
+    def test_tty_for_pid_is_none_without_a_tty(self):
+        # A process whose stdio is all pipes has no pty to discover
+        proc = subprocess.Popen(["sleep", "5"], stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            out = subprocess.run(
+                [sys.executable, "-c",
+                 "import importlib.util, sys\n"
+                 "spec = importlib.util.spec_from_file_location('h', %r)\n"
+                 "h = importlib.util.module_from_spec(spec)\n"
+                 "spec.loader.exec_module(h)\n"
+                 "print(h.tty_for_pid(%d))" % (HOOK, proc.pid)],
+                text=True, capture_output=True, env=self.env)
+            self.assertEqual(out.stdout.strip(), "None")
+        finally:
+            proc.kill()
+
     def test_respects_dismissal_tombstone(self):
         dismissed = os.path.join(self.home, ".claude", "jattends", "dismissed")
         os.makedirs(dismissed, exist_ok=True)
