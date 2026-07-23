@@ -3,11 +3,14 @@
 for the Jattends menubar app to monitor.
 
 Usage:
-  As a hook:  echo '{"session_id":...}' | jattends-hook.py
-  Scan mode:  jattends-hook.py --scan   (discover untracked claude processes)
+  As a hook:   echo '{"session_id":...}' | jattends-hook.py
+  Scan mode:   jattends-hook.py --scan   (discover untracked claude processes)
+  Statusline:  echo "$input" | jattends-hook.py --statusline
+               (bridge from a statusLine command: captures session_name)
 
 Session files: ~/.claude/jattends/sessions/<sessionId>.json
 Approval requests: ~/.claude/jattends/approvals/<requestId>.json
+Session labels: ~/.claude/jattends/labels/<sessionId>  (plain text)
 """
 
 import json
@@ -22,6 +25,7 @@ SESSIONS_DIR = os.path.join(BASE_DIR, "sessions")
 APPROVALS_DIR = os.path.join(BASE_DIR, "approvals")
 DISMISSED_DIR = os.path.join(BASE_DIR, "dismissed")
 SUBAGENTS_DIR = os.path.join(BASE_DIR, "subagents")
+LABELS_DIR = os.path.join(BASE_DIR, "labels")
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
 TERMINALS = {"ghostty", "Terminal", "iTerm2", "kitty", "warp", "stable",
@@ -126,6 +130,77 @@ def tool_summary(tool_name, tool_input):
 def truncate_prompt(prompt):
     first_line = str(prompt).strip().split("\n")[0]
     return first_line[:120] if first_line else None
+
+
+# --- Session labels ---
+# One plain-text file per session (labels/<session_id>) holding its display
+# name: the auto-generated topic title or /rename name from Claude Code.
+# Written by the statusline bridge (--statusline) on every refresh and by
+# SessionStart's session_title; the app prefers it over the cwd basename.
+# A sidecar file (not a field in the session JSON) so the statusline never
+# races the hook's read-modify-write of the session file.
+
+def safe_filename(name):
+    return "".join(c if c.isalnum() or c in "-_." else "_" for c in str(name))
+
+
+def label_path(session_id):
+    return os.path.join(LABELS_DIR, safe_filename(session_id))
+
+
+def read_label(session_id):
+    try:
+        with open(label_path(session_id)) as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+def write_label(session_id, name):
+    name = " ".join(str(name).split())[:120]
+    if not name or name == read_label(session_id):
+        return
+    os.makedirs(LABELS_DIR, exist_ok=True)
+    path = label_path(session_id)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(name)
+    os.replace(tmp, path)
+
+
+def remove_label(session_id):
+    try:
+        os.remove(label_path(session_id))
+    except FileNotFoundError:
+        pass
+
+
+def prune_labels():
+    """Drop labels for sessions that no longer have a session file."""
+    if not os.path.isdir(LABELS_DIR):
+        return
+    for name in os.listdir(LABELS_DIR):
+        if not os.path.exists(os.path.join(SESSIONS_DIR, name + ".json")):
+            try:
+                os.remove(os.path.join(LABELS_DIR, name))
+            except FileNotFoundError:
+                pass
+
+
+def handle_statusline():
+    """Statusline bridge: capture session_name from the statusLine JSON.
+
+    Claude Code re-runs the statusLine command on every refresh with the
+    session's current name (custom or auto-generated topic title), which
+    hooks never see mid-session — this is the only live source for it.
+    """
+    d = json.load(sys.stdin)
+    session_id = d.get("session_id")
+    if not session_id:
+        return
+    name = d.get("session_name") or (d.get("agent") or {}).get("name")
+    if name:
+        write_label(session_id, name)
 
 
 # --- Subagent markers ---
@@ -257,6 +332,7 @@ def scan():
     procs = process_table()
     prune_tombstones(procs)
     prune_subagents()
+    prune_labels()
     for pid, (_, ptty, name) in procs.items():
         if name != "claude":
             continue
@@ -308,6 +384,7 @@ def handle_permission_request(d, session, procs):
         "requestId": request_id,
         "sessionId": d["session_id"],
         "cwd": d.get("cwd", ""),
+        "sessionName": read_label(d["session_id"]),
         "toolName": d.get("tool_name", ""),
         "summary": tool_summary(d.get("tool_name", ""), d.get("tool_input")),
         "createdAt": utcnow(),
@@ -361,6 +438,7 @@ def handle_event():
             pass
         clear_tombstones(session_id, claude_pid)
         clear_subagents(session_id)
+        remove_label(session_id)
         try:
             os.remove(session_file)
         except FileNotFoundError:
@@ -398,6 +476,10 @@ def handle_event():
         # source=compact means an auto-compact restart mid-turn: still working
         status = "working" if d.get("source") == "compact" else "idle"
         detail = None
+        # Resumed/renamed sessions carry their title here; fresh ones get
+        # theirs later via the statusline bridge.
+        if d.get("session_title"):
+            write_label(session_id, d["session_title"])
     elif event == "UserPromptSubmit":
         status = "working"
         detail = None
@@ -484,6 +566,8 @@ def main():
     os.makedirs(SESSIONS_DIR, exist_ok=True)
     if len(sys.argv) > 1 and sys.argv[1] == "--scan":
         scan()
+    elif len(sys.argv) > 1 and sys.argv[1] == "--statusline":
+        handle_statusline()
     else:
         handle_event()
 

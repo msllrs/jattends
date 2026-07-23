@@ -247,6 +247,71 @@ class SubagentTrackingTests(HookTestCase):
         self.assertFalse(os.path.exists(self.subagent_dir()))
 
 
+class SessionLabelTests(HookTestCase):
+    def label_path(self, session_id="s1"):
+        return os.path.join(self.home, ".claude", "jattends", "labels", session_id)
+
+    def read_label(self, session_id="s1"):
+        with open(self.label_path(session_id)) as f:
+            return f.read()
+
+    def fire_statusline(self, payload):
+        return subprocess.run(
+            [sys.executable, HOOK, "--statusline"], input=json.dumps(payload),
+            text=True, capture_output=True, env=self.env)
+
+    def test_statusline_writes_session_name(self):
+        r = self.fire_statusline({"session_id": "s1",
+                                  "session_name": "fix scroll overlay gaps"})
+        self.assertEqual(r.stdout, "")
+        self.assertEqual(self.read_label(), "fix scroll overlay gaps")
+
+    def test_statusline_without_name_writes_nothing(self):
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/proj"})
+        self.assertFalse(os.path.exists(self.label_path()))
+
+    def test_statusline_keeps_existing_label_when_name_disappears(self):
+        self.fire_statusline({"session_id": "s1", "session_name": "polish menu"})
+        self.fire_statusline({"session_id": "s1"})
+        self.assertEqual(self.read_label(), "polish menu")
+
+    def test_statusline_falls_back_to_agent_name(self):
+        self.fire_statusline({"session_id": "s1",
+                              "agent": {"name": "security-reviewer"}})
+        self.assertEqual(self.read_label(), "security-reviewer")
+
+    def test_statusline_normalizes_whitespace_and_truncates(self):
+        self.fire_statusline({"session_id": "s1",
+                              "session_name": "  a\nb   c  " + "x" * 200})
+        label = self.read_label()
+        self.assertTrue(label.startswith("a b c"))
+        self.assertLessEqual(len(label), 120)
+
+    def test_session_start_title_writes_label(self):
+        self.fire("SessionStart", source="resume", session_title="ship the labels")
+        self.assertEqual(self.read_label(), "ship the labels")
+
+    def test_session_end_removes_label(self):
+        self.fire_statusline({"session_id": "s1", "session_name": "polish menu"})
+        self.fire("SessionEnd", reason="exit")
+        self.assertFalse(os.path.exists(self.label_path()))
+
+    def test_scan_prunes_orphaned_labels(self):
+        self.fire_statusline({"session_id": "gone", "session_name": "old"})
+        self.fire_statusline({"session_id": "s1", "session_name": "alive"})
+        self.fire("SessionStart", source="startup")  # s1 has a session file
+        subprocess.run([sys.executable, HOOK, "--scan"],
+                       text=True, capture_output=True, env=self.env)
+        self.assertFalse(os.path.exists(self.label_path("gone")))
+        self.assertEqual(self.read_label(), "alive")
+
+    def test_malformed_statusline_input_never_fails(self):
+        r = subprocess.run([sys.executable, HOOK, "--statusline"],
+                           input="not json", text=True, capture_output=True,
+                           env=self.env)
+        self.assertEqual(r.returncode, 0)
+
+
 class FakeJattends:
     """Make the hook believe the Jattends app is (or isn't) running,
     independent of whether the real app runs on this machine."""
@@ -323,6 +388,41 @@ class ApprovalFlowTests(HookTestCase):
         decision = json.loads(r.stdout)["hookSpecificOutput"]["decision"]
         self.assertEqual(decision["behavior"], "deny")
         self.assertIn("reason", decision)
+
+    def test_request_carries_session_label(self):
+        self.write_config(inAppApprovals=True, approvalWaitSeconds=15)
+        subprocess.run(
+            [sys.executable, HOOK, "--statusline"],
+            input=json.dumps({"session_id": "s1", "session_name": "polish menu"}),
+            text=True, capture_output=True, env=self.env)
+        captured = {}
+
+        def capture_then_allow():
+            def worker():
+                deadline = time.time() + 10
+                while time.time() < deadline:
+                    requests = [f for f in os.listdir(self.approvals)
+                                if f.endswith(".json") and ".decision." not in f] \
+                        if os.path.isdir(self.approvals) else []
+                    if requests:
+                        with open(os.path.join(self.approvals, requests[0])) as f:
+                            captured.update(json.load(f))
+                        path = os.path.join(
+                            self.approvals,
+                            requests[0][:-len(".json")] + ".decision.json")
+                        with open(path, "w") as f:
+                            json.dump({"behavior": "allow"}, f)
+                        return
+                    time.sleep(0.05)
+            t = threading.Thread(target=worker)
+            t.start()
+            return t
+
+        with FakeJattends(self.env):
+            t = capture_then_allow()
+            self.fire_permission()
+            t.join()
+        self.assertEqual(captured.get("sessionName"), "polish menu")
 
     def test_timeout_cleans_up_and_falls_through(self):
         self.write_config(inAppApprovals=True, approvalWaitSeconds=1)
