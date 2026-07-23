@@ -128,11 +128,17 @@ Reader conventions both implementations follow:
 
 Writers: the statusline bridge (`jattends-hook.py --statusline`, fed the statusLine payload by the user's statusline command — the only live source of `session_name`) and `SessionStart`'s optional `session_title`. `SessionEnd` removes the label; `--scan` prunes labels without a session file. Approval requests snapshot it as `sessionName`.
 
-Statusline bridge hookup (one line in the user's statusline script, backgrounded so it never delays rendering):
+Statusline bridge hookup (one line in the user's statusline script; must run in the FOREGROUND — Claude Code reaps the statusline's process group on exit, so a backgrounded child dies before Python starts):
 
 ```bash
-echo "$input" | ~/.claude/hooks/jattends-hook.py --statusline >/dev/null 2>&1 &
+echo "$input" | ~/.claude/hooks/jattends-hook.py --statusline >/dev/null 2>&1 || true
 ```
+
+## Statusline-tracked sessions
+
+The agents feature runs sessions under a background pty daemon (`claude.exe`, `claude bg-pty-host`/`bg-spare` processes) whose hook events never fire — but their statusline does. The bridge therefore also registers any session without a hook-written record: it writes a session file with `trackedBy: "statusline"`, `status: "working"`, `updatedAt: now` (throttled to one rewrite per 5s), plus `claudePid`/terminal info from the process-tree walk and `lastPrompt` from the transcript's first real user message (bounded read).
+
+Ownership rules: the bridge never touches a record without the `trackedBy` marker; any real hook event pops the marker and takes over. Status semantics for bridge sessions are coarse — "working while refreshes keep arriving" — and the readers' existing 5-minute quiet timeout downgrades them to ready. Dismissal tombstones are respected (the refresh loop doesn't count as activity). Readers match claude processes as `claude`, `claude.exe`, or `claude *` (pty hosts).
 
 ## Hook event → status mapping
 
