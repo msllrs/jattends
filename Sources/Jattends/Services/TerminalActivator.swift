@@ -61,11 +61,16 @@ enum TerminalActivator {
             return
         }
 
-        // Fallback: try by app name with AppleScript title matching
-        let appName = resolveAppName(session.terminalApp)
-        if activateByAppleScript(appName: appName, session: session) {
-            log("  -> AppleScript matched")
-            return
+        // Fallback: try by app name with AppleScript title matching — only
+        // for terminals we can map to a real app, otherwise macOS shows a
+        // "Choose Application" dialog for the unknown name
+        if let appName = appleScriptTarget(session.terminalApp) {
+            if activateByAppleScript(appName: appName, session: session) {
+                log("  -> AppleScript matched")
+                return
+            }
+        } else {
+            log("  -> AppleScript skipped (no known app)")
         }
 
         // Last resort: just bring the app forward
@@ -75,9 +80,11 @@ enum TerminalActivator {
         }
     }
 
-    private static func resolveAppName(_ termProgram: String?) -> String {
-        guard let term = termProgram else { return "Terminal" }
-        return appNameMap[term] ?? term
+    /// App name safe to target with AppleScript, or nil when the TERM_PROGRAM
+    /// value is missing or not in the map (e.g. "unknown" from --scan).
+    static func appleScriptTarget(_ terminalApp: String?) -> String? {
+        guard let term = terminalApp else { return nil }
+        return appNameMap[term]
     }
 
     // MARK: - OSC 2 title-marker approach
