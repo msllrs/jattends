@@ -130,13 +130,22 @@ final class SessionStore {
         kill(pid_t(pid), 0) == 0
     }
 
-    /// Get cwds of all live `claude` processes via ps + lsof.
+    /// Whether a ps comm value is a Claude Code session process. Terminal
+    /// sessions run as `claude`; the agents feature runs sessions under
+    /// `claude.exe` daemons and `claude bg-pty-host`/`bg-spare` ptys.
+    static func isClaudeProcess(comm: String) -> Bool {
+        let name = URL(fileURLWithPath: comm).lastPathComponent
+        return name == "claude" || name == "claude.exe" || name.hasPrefix("claude ")
+    }
+
+    /// Get cwds of all live claude processes via ps + lsof.
     private func liveClaudeCwds() -> Set<String> {
         var cwds = Set<String>()
         guard let psOutput = try? runCommand("/bin/ps", ["-eo", "pid,comm"]) else { return cwds }
         for line in psOutput.split(separator: "\n") {
             let parts = line.split(separator: " ", maxSplits: 1)
-            guard parts.count == 2, parts[1].trimmingCharacters(in: .whitespaces) == "claude",
+            guard parts.count == 2,
+                  Self.isClaudeProcess(comm: parts[1].trimmingCharacters(in: .whitespaces)),
                   let pid = Int(parts[0].trimmingCharacters(in: .whitespaces)) else { continue }
             if let lsofOutput = try? runCommand("/usr/sbin/lsof", ["-a", "-d", "cwd", "-p", String(pid), "-Fn"]) {
                 for lsofLine in lsofOutput.split(separator: "\n") {
