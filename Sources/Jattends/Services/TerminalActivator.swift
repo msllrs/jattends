@@ -16,6 +16,10 @@ enum TerminalActivator {
         "tmux": "Ghostty", // tmux inherits parent; default to common host
     ]
 
+    /// App names the cross-app window title search may touch — the mapped
+    /// terminals only, never arbitrary running applications.
+    static let knownTerminalAppNames: Set<String> = Set(appNameMap.values)
+
     private static var hasPromptedAccessibility = false
 
     /// Append a line to ~/.claude/jattends/debug.log — activation failures
@@ -61,6 +65,14 @@ enum TerminalActivator {
             return
         }
 
+        // Agent-feature sessions have no terminal ancestry (pid/tty are nil),
+        // but their window title carries the session or project name — search
+        // every known terminal app's windows for it.
+        if activateByTitleSearch(session: session) {
+            log("  -> window title search matched")
+            return
+        }
+
         // Fallback: try by app name with AppleScript title matching — only
         // for terminals we can map to a real app, otherwise macOS shows a
         // "Choose Application" dialog for the unknown name
@@ -85,6 +97,47 @@ enum TerminalActivator {
     static func appleScriptTarget(_ terminalApp: String?) -> String? {
         guard let term = terminalApp else { return nil }
         return appNameMap[term]
+    }
+
+    /// Title substrings to look for, most specific first: the session name
+    /// (statusline-set titles carry it), then the project folder name.
+    static func titleMatchNeedles(for session: SessionInfo) -> [String] {
+        if let name = session.sessionName, !name.isEmpty {
+            return [name, session.projectName]
+        }
+        return [session.projectName]
+    }
+
+    // MARK: - Cross-app window title search (for sessions without a terminal PID)
+
+    /// Scan the windows of every running terminal app for one whose AXTitle
+    /// contains a needle. Outer loop over needles so the most specific match
+    /// wins globally, not just within one app.
+    private static func activateByTitleSearch(session: SessionInfo) -> Bool {
+        guard AXIsProcessTrusted() else { return false }
+
+        let apps = NSWorkspace.shared.runningApplications.filter { app in
+            guard let name = app.localizedName else { return false }
+            return knownTerminalAppNames.contains(name)
+        }
+
+        for needle in titleMatchNeedles(for: session) {
+            for app in apps {
+                let pid = Int(app.processIdentifier)
+                let appElement = AXUIElementCreateApplication(app.processIdentifier)
+                var windowsRef: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+                      let windows = windowsRef as? [AXUIElement]
+                else { continue }
+
+                for window in windows {
+                    if let title = axStringAttribute(window, kAXTitleAttribute), title.contains(needle) {
+                        return raiseWindowAndActivate(window: window, pid: pid)
+                    }
+                }
+            }
+        }
+        return false
     }
 
     // MARK: - OSC 2 title-marker approach
