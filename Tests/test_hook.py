@@ -296,13 +296,19 @@ class SessionLabelTests(HookTestCase):
         self.fire("SessionEnd", reason="exit")
         self.assertFalse(os.path.exists(self.label_path()))
 
-    def test_scan_prunes_orphaned_labels(self):
+    def test_scan_prunes_only_old_orphaned_labels(self):
         self.fire_statusline({"session_id": "gone", "session_name": "old"})
+        self.fire_statusline({"session_id": "fresh", "session_name": "untracked"})
         self.fire_statusline({"session_id": "s1", "session_name": "alive"})
         self.fire("SessionStart", source="startup")  # s1 has a session file
+        two_hours_ago = time.time() - 7200
+        os.utime(self.label_path("gone"), (two_hours_ago, two_hours_ago))
         subprocess.run([sys.executable, HOOK, "--scan"],
                        text=True, capture_output=True, env=self.env)
         self.assertFalse(os.path.exists(self.label_path("gone")))
+        # A recent label without a session file survives — the statusline can
+        # run before the hooks have tracked its session
+        self.assertEqual(self.read_label("fresh"), "untracked")
         self.assertEqual(self.read_label(), "alive")
 
     def test_malformed_statusline_input_never_fails(self):

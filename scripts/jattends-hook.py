@@ -176,15 +176,21 @@ def remove_label(session_id):
 
 
 def prune_labels():
-    """Drop labels for sessions that no longer have a session file."""
+    """Drop labels whose session file is gone — but only after an hour,
+    since the statusline can label a session the hooks aren't tracking
+    (yet), and the label must survive until its session file appears."""
     if not os.path.isdir(LABELS_DIR):
         return
+    now = time.time()
     for name in os.listdir(LABELS_DIR):
-        if not os.path.exists(os.path.join(SESSIONS_DIR, name + ".json")):
-            try:
-                os.remove(os.path.join(LABELS_DIR, name))
-            except FileNotFoundError:
-                pass
+        if os.path.exists(os.path.join(SESSIONS_DIR, name + ".json")):
+            continue
+        path = os.path.join(LABELS_DIR, name)
+        try:
+            if now - os.path.getmtime(path) > 3600:
+                os.remove(path)
+        except OSError:
+            continue
 
 
 def handle_statusline():
