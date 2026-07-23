@@ -301,6 +301,10 @@ class SessionLabelTests(HookTestCase):
         self.fire_statusline({"session_id": "fresh", "session_name": "untracked"})
         self.fire_statusline({"session_id": "s1", "session_name": "alive"})
         self.fire("SessionStart", source="startup")  # s1 has a session file
+        # Orphan the labels: the app deletes session files when their
+        # process dies, leaving the label behind
+        os.remove(os.path.join(self.sessions, "gone.json"))
+        os.remove(os.path.join(self.sessions, "fresh.json"))
         two_hours_ago = time.time() - 7200
         os.utime(self.label_path("gone"), (two_hours_ago, two_hours_ago))
         subprocess.run([sys.executable, HOOK, "--scan"],
@@ -316,6 +320,78 @@ class SessionLabelTests(HookTestCase):
                            input="not json", text=True, capture_output=True,
                            env=self.env)
         self.assertEqual(r.returncode, 0)
+
+
+class StatuslineTrackingTests(HookTestCase):
+    """The bridge registers sessions hooks never see (agents-feature ptys)."""
+
+    def fire_statusline(self, payload):
+        return subprocess.run(
+            [sys.executable, HOOK, "--statusline"], input=json.dumps(payload),
+            text=True, capture_output=True, env=self.env)
+
+    def write_transcript(self, entries):
+        path = os.path.join(self.home, "transcript.jsonl")
+        with open(path, "w") as f:
+            for entry in entries:
+                f.write(json.dumps(entry) + "\n")
+        return path
+
+    def age_session(self, session_id="s1", seconds=10):
+        path = os.path.join(self.sessions, session_id + ".json")
+        past = time.time() - seconds
+        os.utime(path, (past, past))
+
+    def test_registers_untracked_session(self):
+        transcript = self.write_transcript([
+            {"type": "user", "isMeta": True,
+             "message": {"content": "<command-name>ignored</command-name>"}},
+            {"type": "user", "message": {"content": [
+                {"type": "tool_result", "content": "ignored"}]}},
+            {"type": "user", "message": {"content": "polish the beta badge\nmore"}},
+        ])
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/wt",
+                              "transcript_path": transcript})
+        s = self.read_session()
+        self.assertEqual(s["status"], "working")
+        self.assertEqual(s["trackedBy"], "statusline")
+        self.assertEqual(s["cwd"], "/tmp/wt")
+        self.assertEqual(s["lastPrompt"], "polish the beta badge")
+
+    def test_never_touches_hook_owned_sessions(self):
+        self.fire("SessionStart", source="startup")
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/other"})
+        s = self.read_session()
+        self.assertEqual(s["status"], "idle")
+        self.assertNotIn("trackedBy", s)
+        self.assertEqual(s["cwd"], "/tmp/proj")
+
+    def test_hook_event_takes_ownership(self):
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/wt"})
+        self.fire("UserPromptSubmit", prompt="now via hooks")
+        s = self.read_session()
+        self.assertNotIn("trackedBy", s)
+        self.assertEqual(s["status"], "working")
+        # ...and the bridge stays hands-off afterwards
+        self.age_session()
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/elsewhere"})
+        self.assertEqual(self.read_session()["cwd"], "/tmp/proj")
+
+    def test_rewrites_are_throttled(self):
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/wt"})
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/changed"})
+        self.assertEqual(self.read_session()["cwd"], "/tmp/wt")
+        self.age_session()
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/changed"})
+        self.assertEqual(self.read_session()["cwd"], "/tmp/changed")
+
+    def test_respects_dismissal_tombstone(self):
+        dismissed = os.path.join(self.home, ".claude", "jattends", "dismissed")
+        os.makedirs(dismissed, exist_ok=True)
+        open(os.path.join(dismissed, "session-s1"), "w").close()
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/wt"})
+        self.assertFalse(
+            os.path.exists(os.path.join(self.sessions, "s1.json")))
 
 
 class FakeJattends:

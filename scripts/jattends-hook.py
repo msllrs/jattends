@@ -75,6 +75,12 @@ def process_table():
     return procs
 
 
+def is_claude_proc(name):
+    """Terminal sessions run as `claude`; the agents feature runs sessions
+    under `claude.exe` daemons and `claude bg-pty-host`/`bg-spare` ptys."""
+    return name in ("claude", "claude.exe") or name.startswith("claude ")
+
+
 def find_process_info(start_pid, procs):
     """Walk up the tree from start_pid: returns (claude_pid, tty, terminal_pid, terminal_app)."""
     claude_pid = None
@@ -86,7 +92,7 @@ def find_process_info(start_pid, procs):
         if pid is None or pid <= 1 or pid not in procs:
             break
         ppid, ptty, name = procs[pid]
-        if name == "claude" and claude_pid is None:
+        if is_claude_proc(name) and claude_pid is None:
             claude_pid = pid
             if ptty not in ("??", "-", ""):
                 tty = "/dev/" + ptty
@@ -193,12 +199,105 @@ def prune_labels():
             continue
 
 
+def first_prompt_from_transcript(path):
+    """First real user message from a transcript, for a row's detail line.
+    Bounded read: agent sessions can have huge transcripts."""
+    if not path:
+        return None
+    try:
+        with open(path) as f:
+            for _ in range(50):
+                line = f.readline(500_000)
+                if not line:
+                    break
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    continue
+                if entry.get("type") != "user" or entry.get("isMeta"):
+                    continue
+                content = (entry.get("message") or {}).get("content")
+                if isinstance(content, list):
+                    content = next(
+                        (b.get("text") for b in content
+                         if isinstance(b, dict) and b.get("type") == "text"),
+                        None)
+                if isinstance(content, str) and content.strip() \
+                        and not content.lstrip().startswith("<"):
+                    return truncate_prompt(content)
+    except OSError:
+        pass
+    return None
+
+
+# Bridge-registered sessions rewrite at most this often — statusline
+# refreshes can arrive several times a second while Claude streams.
+STATUSLINE_WRITE_INTERVAL = 5
+
+
+def register_statusline_session(d):
+    """Track sessions hooks never see (the agents feature runs sessions
+    under a background pty daemon whose hook events don't fire) from their
+    statusline refreshes. Hook-written records are left alone; a session is
+    marked trackedBy=statusline and shows working while refreshes keep
+    arriving (readers already downgrade quiet "working" to idle/ready).
+    """
+    session_id = d["session_id"]
+    session_file = os.path.join(SESSIONS_DIR, session_id + ".json")
+
+    session = {}
+    try:
+        with open(session_file) as f:
+            session = json.load(f)
+    except (OSError, ValueError):
+        pass
+    if session and session.get("trackedBy") != "statusline":
+        return  # hook-owned — never race the hook's writes
+    if session:
+        try:
+            if time.time() - os.path.getmtime(session_file) < STATUSLINE_WRITE_INTERVAL:
+                return
+        except OSError:
+            pass
+    else:
+        # Respect "hide until next activity" — the bridge refresh loop
+        # isn't activity, so don't resurrect a dismissed session.
+        if os.path.exists(os.path.join(DISMISSED_DIR, f"session-{session_id}")):
+            return
+
+    if not session.get("claudePid"):
+        procs = process_table()
+        claude_pid, tty, term_pid, term_app = find_process_info(os.getpid(), procs)
+        if not session and claude_pid and is_dismissed(claude_pid):
+            return
+        session["claudePid"] = claude_pid
+        session["terminalTty"] = tty
+        session["terminalPid"] = term_pid
+        session["terminalApp"] = term_app or "unknown"
+
+    if not session.get("lastPrompt"):
+        prompt = first_prompt_from_transcript(d.get("transcript_path"))
+        if prompt:
+            session["lastPrompt"] = prompt
+
+    session.update({
+        "sessionId": session_id,
+        "cwd": d.get("cwd", session.get("cwd", "")),
+        "status": "working",
+        "trackedBy": "statusline",
+        "transcriptPath": d.get("transcript_path", session.get("transcriptPath")),
+        "updatedAt": utcnow(),
+    })
+    atomic_write(session_file, session)
+
+
 def handle_statusline():
     """Statusline bridge: capture session_name from the statusLine JSON.
 
     Claude Code re-runs the statusLine command on every refresh with the
     session's current name (custom or auto-generated topic title), which
     hooks never see mid-session — this is the only live source for it.
+    Also registers sessions the hooks aren't tracking (see above).
     """
     d = json.load(sys.stdin)
     session_id = d.get("session_id")
@@ -207,6 +306,7 @@ def handle_statusline():
     name = d.get("session_name") or (d.get("agent") or {}).get("name")
     if name:
         write_label(session_id, name)
+    register_statusline_session(d)
 
 
 # --- Subagent markers ---
@@ -458,6 +558,9 @@ def handle_event():
             session = json.load(f)
     except (OSError, ValueError):
         pass
+    # A real hook event means hooks work for this session — take ownership
+    # from the statusline bridge, which then stops writing the record.
+    session.pop("trackedBy", None)
 
     # Reuse process info from the existing record when possible — the tree
     # walk costs a full ps scan and the answer never changes mid-session.
