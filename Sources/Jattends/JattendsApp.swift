@@ -496,16 +496,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func makeAttributedTitle(for session: SessionInfo) -> NSAttributedString {
         var parts: [String] = []
 
-        // When the session name takes the title line, keep the project
-        // visible in the detail line — several sessions may share it.
-        if session.sessionName != nil {
-            parts.append(session.projectName)
-        }
-
         // Elapsed turn time while Claude is actually going
+        var elapsed: String?
         if session.status == .working || session.status == .compacting,
            let started = session.turnStartedAt {
-            parts.append(SessionInfo.shortDuration(since: started))
+            elapsed = SessionInfo.shortDuration(since: started)
+        }
+
+        // When the session name takes the title line, the project leads the
+        // detail line — several sessions may share it — and the elapsed time
+        // moves to the end so it doesn't read as part of the project name.
+        let projectLeads = session.sessionName != nil
+        if projectLeads {
+            parts.append(session.projectName)
+        } else if let elapsed {
+            parts.append(elapsed)
         }
 
         if let count = session.subagentCount, count > 0 {
@@ -519,6 +524,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             parts.append(session.status.label)
         } else if let prompt = session.lastPrompt {
             parts.append(prompt)
+        }
+
+        if projectLeads, let elapsed {
+            parts.append(elapsed)
         }
 
         return Self.makeMenuItemTitle(
