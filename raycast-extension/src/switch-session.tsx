@@ -100,7 +100,9 @@ function liveClaudeCwds(): Set<string> {
   try {
     const psOutput = execFileSync("ps", ["-eo", "pid,comm"], { encoding: "utf-8" });
     for (const line of psOutput.split("\n")) {
-      const match = line.trim().match(/^(\d+)\s+claude$/);
+      // `claude` is a terminal session; `claude.exe` daemons and
+      // `claude bg-*` ptys run sessions for the agents feature
+      const match = line.trim().match(/^(\d+)\s+(?:.*\/)?claude(?:\.exe| .+)?$/);
       if (!match) continue;
       const pid = match[1];
       try {
