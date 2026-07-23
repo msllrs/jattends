@@ -28,12 +28,20 @@ interface SessionInfo {
 
 interface ParsedSession extends SessionInfo {
   projectName: string;
+  /** Claude Code's session display name, from the labels/ sidecar. */
+  sessionName?: string;
   updatedDate: Date;
+}
+
+/** Session name when Claude Code has one, else the project folder name. */
+function displayName(session: ParsedSession): string {
+  return session.sessionName || session.projectName;
 }
 
 // --- Constants ---
 
 const SESSIONS_DIR = join(homedir(), ".claude", "jattends", "sessions");
+const LABELS_DIR = join(homedir(), ".claude", "jattends", "labels");
 const STALE_MS = 24 * 60 * 60 * 1000; // 24 hours
 const WORKING_TIMEOUT_MS = 5 * 60 * 1000; // If "working" but not updated in 5min, treat as idle
 
@@ -179,10 +187,18 @@ async function loadSessions(): Promise<ParsedSession[]> {
           ? "idle"
           : normalized;
 
+      let sessionName: string | undefined;
+      try {
+        sessionName = (await readFile(join(LABELS_DIR, raw.sessionId), "utf-8")).trim() || undefined;
+      } catch {
+        /* no label written yet */
+      }
+
       sessions.push({
         ...raw,
         status: effectiveStatus,
         projectName: basename(raw.cwd),
+        sessionName,
         updatedDate,
       });
     } catch {
@@ -429,9 +445,20 @@ export default function SwitchSession() {
             return (
               <List.Item
                 key={session.sessionId}
-                title={session.projectName}
-                subtitle={session.statusDetail ?? session.lastPrompt ?? session.cwd}
-                keywords={[session.sessionId, session.cwd, session.projectName, session.lastPrompt ?? ""]}
+                title={displayName(session)}
+                subtitle={[
+                  session.sessionName ? session.projectName : null,
+                  session.statusDetail ?? session.lastPrompt ?? session.cwd,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+                keywords={[
+                  session.sessionId,
+                  session.cwd,
+                  session.projectName,
+                  session.sessionName ?? "",
+                  session.lastPrompt ?? "",
+                ]}
                 icon={{ source: config.icon, tintColor: config.color }}
                 accessories={[
                   ...(session.subagentCount ? [{ tag: `⑂ ${session.subagentCount}` }] : []),
