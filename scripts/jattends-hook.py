@@ -324,9 +324,18 @@ def handle_statusline():
     session_id = d.get("session_id")
     if not session_id:
         return
-    name = d.get("session_name") or (d.get("agent") or {}).get("name")
+    name = d.get("session_name")
     if name:
         write_label(session_id, name)
+    else:
+        # agent.name is only a seed for unlabeled sessions: daemon-hosted
+        # refreshes arrive without session_name but with agent info, and
+        # letting it overwrite would clobber the real topic title. "claude"
+        # is the catch-all agent type, not a title — skip it so the app's
+        # project-name fallback shows instead.
+        agent_name = (d.get("agent") or {}).get("name")
+        if agent_name and agent_name != "claude" and read_label(session_id) is None:
+            write_label(session_id, agent_name)
     register_statusline_session(d)
 
 

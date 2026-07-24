@@ -302,6 +302,21 @@ class SessionLabelTests(HookTestCase):
                               "agent": {"name": "security-reviewer"}})
         self.assertEqual(self.read_label(), "security-reviewer")
 
+    def test_statusline_agent_name_never_clobbers_real_label(self):
+        # A session moved to daemon hosting keeps refreshing without
+        # session_name but with agent info — the fallback must not
+        # overwrite the topic title captured earlier.
+        self.fire_statusline({"session_id": "s1", "session_name": "i wanna make…"})
+        self.fire_statusline({"session_id": "s1",
+                              "agent": {"name": "security-reviewer"}})
+        self.assertEqual(self.read_label(), "i wanna make…")
+
+    def test_statusline_ignores_default_agent_name(self):
+        # "claude" is the catch-all agent type, not a session title —
+        # labeling a row "claude" hides the more informative project name.
+        self.fire_statusline({"session_id": "s1", "agent": {"name": "claude"}})
+        self.assertFalse(os.path.exists(self.label_path()))
+
     def test_statusline_normalizes_whitespace_and_truncates(self):
         self.fire_statusline({"session_id": "s1",
                               "session_name": "  a\nb   c  " + "x" * 200})
