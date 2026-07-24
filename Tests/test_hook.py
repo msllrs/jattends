@@ -99,9 +99,31 @@ class StatusMappingTests(HookTestCase):
         self.assertEqual(s["status"], "idle")
         self.assertIsNone(s["statusDetail"])
 
-    def test_notification_agent_needs_input_is_waiting(self):
-        # Genuine questions still demand attention.
+    def test_notification_agent_needs_input_leaves_receiver_alone(self):
+        # agent_needs_input announces a *background* session needing input
+        # and is broadcast to every instance with the agent view open
+        # (Claude Code v2.1.198+). It says nothing about the receiving
+        # session — flipping the receiver to "waiting" creates one ghost
+        # "needs attention" row per open task list. The task's own hooks
+        # (PermissionRequest/Stop) report its status directly.
+        self.fire("SessionStart", source="startup")
         self.fire("Notification", notification_type="agent_needs_input",
+                  message="i wanna make… needs your input: approve Bash")
+        s = self.read_session()
+        self.assertEqual(s["status"], "idle")
+        self.assertIsNone(s["statusDetail"])
+
+    def test_notification_agent_needs_input_writes_nothing_untracked(self):
+        # A receiver the hook has never seen shouldn't gain a record from
+        # a broadcast about some other session.
+        self.fire("Notification", notification_type="agent_needs_input",
+                  message="i wanna make… needs your input: approve Bash")
+        self.assertFalse(os.path.exists(os.path.join(self.sessions, "s1.json")))
+
+    def test_notification_elicitation_dialog_is_waiting(self):
+        # Elicitation dialogs concern the receiving session itself —
+        # genuine questions still demand attention.
+        self.fire("Notification", notification_type="elicitation_dialog",
                   message="Claude is asking a question")
         self.assertEqual(self.read_session()["status"], "waiting")
 

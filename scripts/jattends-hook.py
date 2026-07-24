@@ -640,7 +640,13 @@ def handle_event():
             # attention — treat it exactly like a plain Stop.
             status = "idle"
             detail = None
-        elif ntype in ("agent_needs_input", "elicitation_dialog"):
+        elif ntype == "agent_needs_input":
+            # Broadcast about a *background* session, sent to every
+            # instance with the task-list view open — it says nothing
+            # about this session, and the payload doesn't identify the
+            # task. The background task's own hooks report its status.
+            return
+        elif ntype == "elicitation_dialog":
             status = "waiting"
             detail = msg[:120] or detail
         else:
