@@ -16,6 +16,7 @@ struct PreferencesView: View {
     @AppStorage("hotkeyEnabled") private var hotkeyEnabled = false
     @AppStorage("hotkeyKeyCode") private var hotkeyKeyCode = HotkeyManager.defaultKeyCode
     @AppStorage("hotkeyModifiers") private var hotkeyModifiers = HotkeyManager.defaultModifiers
+    @AppStorage("backgroundSessions") private var backgroundSessions = "all"
 
     @State private var isRecordingShortcut = false
 
@@ -39,6 +40,26 @@ struct PreferencesView: View {
                     }
             } header: {
                 Text("General")
+            }
+
+            Section {
+                Picker("Background sessions", selection: $backgroundSessions) {
+                    Text("Show all").tag("all")
+                    Text("Only when active").tag("active")
+                    Text("Hidden").tag("hidden")
+                }
+                Picker("Auto-clear sessions needing attention", selection: $autoClearMinutes) {
+                    Text("Never").tag(0)
+                    Text("After 15 minutes").tag(15)
+                    Text("After 30 minutes").tag(30)
+                    Text("After 1 hour").tag(60)
+                    Text("After 2 hours").tag(120)
+                }
+            } header: {
+                Text("Application")
+            } footer: {
+                Text("Named tasks always show with your other sessions. Background sessions covers the anonymous sessions Claude Code pre-spawns for its task list; ones needing your attention always show. Auto-clear dismisses sessions left needing attention — approvals, questions, and errors — after the chosen period.")
+                    .foregroundStyle(.secondary)
             }
 
             Section {
@@ -115,21 +136,6 @@ struct PreferencesView: View {
                 .disabled(!soundEnabled)
             } header: {
                 Text("Sound")
-            }
-
-            Section {
-                Picker("Auto-clear waiting sessions", selection: $autoClearMinutes) {
-                    Text("Never").tag(0)
-                    Text("After 15 minutes").tag(15)
-                    Text("After 30 minutes").tag(30)
-                    Text("After 1 hour").tag(60)
-                    Text("After 2 hours").tag(120)
-                }
-            } header: {
-                Text("Sessions")
-            } footer: {
-                Text("Automatically dismiss waiting sessions after a period of inactivity.")
-                    .foregroundStyle(.secondary)
             }
 
             Section {
