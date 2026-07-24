@@ -108,6 +108,18 @@ enum TerminalActivator {
         return [session.projectName]
     }
 
+    /// Index of the window (by title) the AX pass should raise, or nil.
+    /// Checked needle-by-needle across all titles so the most specific
+    /// needle wins globally, not just per window.
+    static func selectWindowIndex(titles: [String], for session: SessionInfo) -> Int? {
+        for needle in titleMatchNeedles(for: session) + [session.cwd] {
+            if let idx = titles.firstIndex(where: { $0.contains(needle) }) {
+                return idx
+            }
+        }
+        return nil
+    }
+
     // MARK: - Cross-app window title search (for sessions without a terminal PID)
 
     /// Scan the windows of every running terminal app for one whose AXTitle
@@ -214,8 +226,6 @@ enum TerminalActivator {
               let windows = windowsRef as? [AXUIElement]
         else { return false }
 
-        let projectName = session.projectName
-
         // First pass: match by AXDocument (most reliable — exact cwd match)
         for window in windows {
             if let doc = axStringAttribute(window, kAXDocumentAttribute), doc.contains(session.cwd) {
@@ -223,18 +233,10 @@ enum TerminalActivator {
             }
         }
 
-        // Second pass: match by AXTitle containing the project name
-        for window in windows {
-            if let title = axStringAttribute(window, kAXTitleAttribute), title.contains(projectName) {
-                return raiseWindowAndActivate(window: window, pid: pid)
-            }
-        }
-
-        // Third pass: match by AXTitle containing the cwd path
-        for window in windows {
-            if let title = axStringAttribute(window, kAXTitleAttribute), title.contains(session.cwd) {
-                return raiseWindowAndActivate(window: window, pid: pid)
-            }
+        // Remaining passes: match by AXTitle, most specific needle first
+        let titles = windows.map { axStringAttribute($0, kAXTitleAttribute) ?? "" }
+        if let idx = selectWindowIndex(titles: titles, for: session) {
+            return raiseWindowAndActivate(window: windows[idx], pid: pid)
         }
 
         return false
