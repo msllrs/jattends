@@ -569,5 +569,235 @@ class ApprovalFlowTests(HookTestCase):
         self.assertEqual(self.read_session()["status"], "approval")
 
 
+class ClaudeSessionRecordTests(HookTestCase):
+    """The hook consults Claude Code's own per-process session records
+    (~/.claude/sessions/<pid>.json) for session kind (bg vs interactive),
+    true busy/idle status, and background task titles."""
+
+    def fire_statusline(self, payload):
+        return subprocess.run(
+            [sys.executable, HOOK, "--statusline"], input=json.dumps(payload),
+            text=True, capture_output=True, env=self.env)
+
+    def write_claude_record(self, pid=4242, **fields):
+        d = os.path.join(self.home, ".claude", "sessions")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "%d.json" % pid), "w") as f:
+            json.dump(fields, f)
+
+    def read_label(self, session_id="s1"):
+        try:
+            path = os.path.join(self.home, ".claude", "jattends",
+                                "labels", session_id)
+            with open(path) as f:
+                return f.read()
+        except OSError:
+            return None
+
+    def age_session(self, session_id="s1", seconds=10):
+        path = os.path.join(self.sessions, session_id + ".json")
+        past = time.time() - seconds
+        os.utime(path, (past, past))
+
+    # --- Bridge status follows the record's busy/idle ---
+
+    def test_idle_record_registers_as_idle(self):
+        self.write_claude_record(sessionId="s1", kind="bg", status="idle")
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/wt"})
+        s = self.read_session()
+        self.assertEqual(s["status"], "idle")
+        self.assertEqual(s["kind"], "bg")
+        self.assertEqual(s["trackedBy"], "statusline")
+
+    def test_busy_record_registers_as_working(self):
+        self.write_claude_record(sessionId="s1", kind="bg", status="busy")
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/wt"})
+        self.assertEqual(self.read_session()["status"], "working")
+
+    def test_missing_record_defaults_to_working_without_kind(self):
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/wt"})
+        s = self.read_session()
+        self.assertEqual(s["status"], "working")
+        self.assertNotIn("kind", s)
+
+    def test_record_for_another_session_is_ignored(self):
+        self.write_claude_record(sessionId="other", kind="bg", status="idle")
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/wt"})
+        s = self.read_session()
+        self.assertEqual(s["status"], "working")
+        self.assertNotIn("kind", s)
+
+    def test_status_follows_record_across_refreshes(self):
+        self.write_claude_record(sessionId="s1", kind="bg", status="busy")
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/wt"})
+        self.assertEqual(self.read_session()["status"], "working")
+        self.write_claude_record(sessionId="s1", kind="bg", status="idle")
+        self.age_session()
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/wt"})
+        self.assertEqual(self.read_session()["status"], "idle")
+
+    # --- Background task titles become labels ---
+
+    def test_bg_task_title_becomes_label(self):
+        self.write_claude_record(sessionId="s1", kind="bg", status="idle",
+                                 name="pr review #46498")
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/wt"})
+        self.assertEqual(self.read_label(), "pr review #46498")
+
+    def test_unnamed_bg_short_id_is_not_a_label(self):
+        # Unnamed bg sessions carry the session id's first 8 chars as name
+        self.write_claude_record(sessionId="abcd1234-5678", kind="bg",
+                                 status="idle", name="abcd1234")
+        self.fire_statusline({"session_id": "abcd1234-5678", "cwd": "/tmp/wt"})
+        self.assertIsNone(self.read_label("abcd1234-5678"))
+
+    def test_session_name_wins_over_task_title(self):
+        self.write_claude_record(sessionId="s1", kind="bg", status="idle",
+                                 name="task title")
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/wt",
+                              "session_name": "topic title"})
+        self.assertEqual(self.read_label(), "topic title")
+
+    def test_existing_label_is_not_clobbered_by_task_title(self):
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/wt",
+                              "session_name": "topic title"})
+        self.write_claude_record(sessionId="s1", kind="bg", status="idle",
+                                 name="task title")
+        self.age_session()
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/wt"})
+        self.assertEqual(self.read_label(), "topic title")
+
+    def test_interactive_record_name_is_not_a_label(self):
+        # Interactive sessions get slug names like "lovable-7b" — their real
+        # titles arrive via session_name, never the record
+        self.write_claude_record(sessionId="s1", kind="interactive",
+                                 status="idle", name="lovable-7b")
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/wt"})
+        self.assertIsNone(self.read_label())
+        self.assertEqual(self.read_session()["kind"], "interactive")
+
+    def test_hook_owned_bg_session_still_gets_title_label(self):
+        # Hooks own the record, but the statusline bridge still writes labels
+        self.fire("SessionStart", source="startup")
+        self.write_claude_record(sessionId="s1", kind="bg", status="idle",
+                                 name="task title")
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/wt"})
+        self.assertEqual(self.read_label(), "task title")
+        s = self.read_session()
+        self.assertNotIn("trackedBy", s)
+        self.assertEqual(s["cwd"], "/tmp/proj")
+
+    # --- Hook events stamp kind but keep their own status ---
+
+    def test_hook_event_stamps_bg_kind(self):
+        self.write_claude_record(sessionId="s1", kind="bg", status="idle")
+        self.fire("UserPromptSubmit", prompt="go")
+        s = self.read_session()
+        self.assertEqual(s["kind"], "bg")
+        self.assertEqual(s["status"], "working")  # event wins over record
+
+    def test_hook_event_without_record_leaves_kind_unset(self):
+        self.fire("UserPromptSubmit", prompt="go")
+        self.assertNotIn("kind", self.read_session())
+
+    # --- Scan heals fossil bridge records ---
+    # Idle daemon sessions stop re-rendering their statusline, so a bridge
+    # record can be stuck at its last written status forever. The periodic
+    # --scan reconciles statusline-tracked records against Claude Code's
+    # session records so they don't need a refresh to heal.
+
+    def scan(self):
+        return subprocess.run([sys.executable, HOOK, "--scan"],
+                              text=True, capture_output=True, env=self.env)
+
+    def test_scan_heals_stuck_statusline_sessions(self):
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/wt"})
+        self.assertEqual(self.read_session()["status"], "working")
+        self.write_claude_record(sessionId="s1", kind="bg", status="idle")
+        self.scan()
+        s = self.read_session()
+        self.assertEqual(s["status"], "idle")
+        self.assertEqual(s["kind"], "bg")
+
+    def test_scan_marks_busy_statusline_sessions_working(self):
+        self.write_claude_record(sessionId="s1", kind="bg", status="idle")
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/wt"})
+        self.write_claude_record(sessionId="s1", kind="bg", status="busy")
+        self.scan()
+        self.assertEqual(self.read_session()["status"], "working")
+
+    def test_scan_labels_stuck_bg_sessions(self):
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/wt"})
+        self.write_claude_record(sessionId="s1", kind="bg", status="idle",
+                                 name="pr review #46498")
+        self.scan()
+        self.assertEqual(self.read_label(), "pr review #46498")
+
+    def test_scan_never_touches_hook_owned_sessions(self):
+        self.fire("UserPromptSubmit", prompt="go")
+        self.write_claude_record(sessionId="s1", kind="bg", status="idle")
+        self.scan()
+        s = self.read_session()
+        self.assertEqual(s["status"], "working")
+        self.assertNotIn("kind", s)
+
+    def test_scan_leaves_statusline_sessions_without_record_alone(self):
+        self.fire_statusline({"session_id": "s1", "cwd": "/tmp/wt"})
+        before = self.read_session()
+        self.scan()
+        self.assertEqual(self.read_session(), before)
+
+    # --- Viewer terminals ---
+    # A terminal claude holding a connection to a background-task daemon's
+    # control.sock is a viewer: it's displaying the task list or an attached
+    # task, both already represented by named rows. Scan stamps `viewer` so
+    # readers can hide the bare host row. JATTENDS_VIEWER_PIDS overrides the
+    # lsof probe for tests (comma-separated pids; empty = none).
+
+    def write_session(self, session_id="s1", **fields):
+        os.makedirs(self.sessions, exist_ok=True)
+        session = {"sessionId": session_id, "cwd": "/tmp/proj",
+                   "status": "idle", "updatedAt": "2026-07-24T00:00:00Z"}
+        session.update(fields)
+        with open(os.path.join(self.sessions, session_id + ".json"), "w") as f:
+            json.dump(session, f)
+
+    def scan_with_viewers(self, pids):
+        env = dict(self.env, JATTENDS_VIEWER_PIDS=pids)
+        return subprocess.run([sys.executable, HOOK, "--scan"],
+                              text=True, capture_output=True, env=env)
+
+    def test_scan_marks_idle_viewer_terminals(self):
+        self.write_session(claudePid=4242, trackedBy="statusline")
+        self.scan_with_viewers("4242")
+        self.assertIs(self.read_session()["viewer"], True)
+
+    def test_scan_clears_viewer_once_detached(self):
+        self.write_session(claudePid=4242, trackedBy="statusline", viewer=True)
+        self.scan_with_viewers("")
+        self.assertNotIn("viewer", self.read_session())
+
+    def test_scan_viewer_stamp_waits_for_quiet_hook_owned_files(self):
+        self.write_session(claudePid=4242)  # hook-owned: no trackedBy
+        self.scan_with_viewers("4242")
+        self.assertNotIn("viewer", self.read_session())  # fresh — hands off
+        self.age_session(seconds=120)
+        self.scan_with_viewers("4242")
+        self.assertIs(self.read_session()["viewer"], True)
+
+    def test_scan_backfills_kind_on_quiet_hook_owned_sessions(self):
+        # A finished bg task may never fire another hook event to stamp its
+        # kind — scan backfills it once the file has been quiet long enough
+        # that racing a live hook write is effectively impossible.
+        self.fire("UserPromptSubmit", prompt="go")
+        self.write_claude_record(sessionId="s1", kind="bg", status="idle")
+        self.age_session(seconds=120)
+        self.scan()
+        s = self.read_session()
+        self.assertEqual(s["kind"], "bg")
+        self.assertEqual(s["status"], "working")  # never status, only kind
+        self.assertNotIn("trackedBy", s)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

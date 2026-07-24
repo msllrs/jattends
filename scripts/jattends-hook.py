@@ -247,17 +247,81 @@ def first_prompt_from_transcript(path):
     return None
 
 
+# --- Claude Code session records ---
+# Claude Code (v2.1.218+) keeps its own per-process session records at
+# ~/.claude/sessions/<pid>.json — a different directory from our
+# SESSIONS_DIR above. Each looks like {"pid": ..., "sessionId": ...,
+# "kind": "bg"|"interactive", "name": ..., "status": "busy"|"idle"}.
+# They're the only source for a session's kind, for real busy/idle state
+# on the statusline path (bridge sessions have no hook events), and for
+# background task titles. Strictly optional enrichment: the directory
+# doesn't exist on older Claude Code versions, so every failure is None
+# and must never break the hook.
+
+CLAUDE_SESSIONS_DIR = os.path.expanduser("~/.claude/sessions")
+
+
+def claude_session_record(session_id, claude_pid=None):
+    """Claude Code's own record for this session, or None.
+
+    Pid-first: records are named after the claude process pid, so a known
+    claudePid is a direct hit. Falls back to scanning the directory — the
+    pid can be unknown (statusline path) or stale (respawned session)."""
+    def load(path):
+        try:
+            with open(path) as f:
+                rec = json.load(f)
+        except (OSError, ValueError):
+            return None
+        if isinstance(rec, dict) and rec.get("sessionId") == session_id:
+            return rec
+        return None
+
+    if claude_pid:
+        rec = load(os.path.join(CLAUDE_SESSIONS_DIR, f"{claude_pid}.json"))
+        if rec:
+            return rec
+    try:
+        names = os.listdir(CLAUDE_SESSIONS_DIR)
+    except OSError:
+        return None
+    for name in names:
+        if name.endswith(".json"):
+            rec = load(os.path.join(CLAUDE_SESSIONS_DIR, name))
+            if rec:
+                return rec
+    return None
+
+
+def bg_task_title(rec):
+    """Usable display title from a background-task record, or None.
+    Interactive records carry slugs like "lovable-7b" (their real titles
+    arrive via session_name), and unnamed bg tasks carry the session id's
+    first 8 chars as a placeholder name — neither is a title."""
+    if not rec or rec.get("kind") != "bg":
+        return None
+    name = rec.get("name")
+    if not name or name == str(rec.get("sessionId") or "")[:8]:
+        return None
+    return name
+
+
 # Bridge-registered sessions rewrite at most this often — statusline
 # refreshes can arrive several times a second while Claude streams.
 STATUSLINE_WRITE_INTERVAL = 5
 
 
-def register_statusline_session(d):
+def register_statusline_session(d, rec=None):
     """Track sessions hooks never see (the agents feature runs sessions
     under a background pty daemon whose hook events don't fire) from their
     statusline refreshes. Hook-written records are left alone; a session is
     marked trackedBy=statusline and shows working while refreshes keep
     arriving (readers already downgrade quiet "working" to idle/ready).
+
+    rec is Claude Code's own session record (claude_session_record), looked
+    up once by the caller. It supplies what the statusline payload can't:
+    the session kind, and the real busy/idle state — bridge sessions have
+    no hook events, so without it every quiet session reads as working.
     """
     session_id = d["session_id"]
     session_file = os.path.join(SESSIONS_DIR, session_id + ".json")
@@ -301,10 +365,15 @@ def register_statusline_session(d):
         if prompt:
             session["lastPrompt"] = prompt
 
+    if rec and rec.get("kind"):
+        session["kind"] = rec["kind"]
+
     session.update({
         "sessionId": session_id,
         "cwd": d.get("cwd", session.get("cwd", "")),
-        "status": "working",
+        # Only an explicit "idle" from the record downgrades — busy,
+        # missing record, or an unknown value all stay "working".
+        "status": "idle" if rec and rec.get("status") == "idle" else "working",
         "trackedBy": "statusline",
         "transcriptPath": d.get("transcript_path", session.get("transcriptPath")),
         "updatedAt": utcnow(),
@@ -324,19 +393,26 @@ def handle_statusline():
     session_id = d.get("session_id")
     if not session_id:
         return
+    # One record lookup serves both the label and the registration below.
+    rec = claude_session_record(session_id)
     name = d.get("session_name")
     if name:
         write_label(session_id, name)
-    else:
-        # agent.name is only a seed for unlabeled sessions: daemon-hosted
-        # refreshes arrive without session_name but with agent info, and
-        # letting it overwrite would clobber the real topic title. "claude"
-        # is the catch-all agent type, not a title — skip it so the app's
-        # project-name fallback shows instead.
+    elif read_label(session_id) is None:
+        # No label yet — seed one, but never overwrite: daemon-hosted
+        # refreshes arrive without session_name, and letting a fallback
+        # clobber the real topic title would lose it. Precedence for the
+        # seed: a named bg task's title (from Claude Code's own session
+        # record — no hook or statusline field ever carries it), then
+        # agent.name. "claude" is the catch-all agent type, not a title —
+        # skip it so the app's project-name fallback shows instead.
+        title = bg_task_title(rec)
         agent_name = (d.get("agent") or {}).get("name")
-        if agent_name and agent_name != "claude" and read_label(session_id) is None:
+        if title:
+            write_label(session_id, title)
+        elif agent_name and agent_name != "claude":
             write_label(session_id, agent_name)
-    register_statusline_session(d)
+    register_statusline_session(d, rec)
 
 
 # --- Subagent markers ---
@@ -449,9 +525,148 @@ def prune_tombstones(procs):
 
 # --- Scan mode: discover untracked claude processes ---
 
+def viewer_claude_pids():
+    """Pids of claude processes connected to a background-task daemon's
+    control socket (cc-daemon.*/control.sock).
+
+    Such a terminal is a "viewer": it's displaying the task list or an
+    attached task, both already represented by named task rows — scan
+    stamps them so readers can hide the bare host row. Test/debug
+    override: JATTENDS_VIEWER_PIDS (comma-separated pids; empty = none),
+    like JATTENDS_APP_RUNNING.
+
+    lsof's unix-socket entries join via kernel addresses: the d field is
+    the socket's own address and the n field is either the bound sock
+    path (server side) or "->0xPEER" (a connected client end). A pid is a
+    viewer if any of its peer addresses resolves to a control.sock path.
+    Addresses are normalized (drop 0x and leading zeros) — peer refs can
+    render with different zero-padding than device fields. Any lsof
+    failure degrades to an empty set; scan must never break on this.
+    """
+    override = os.environ.get("JATTENDS_VIEWER_PIDS")
+    if override is not None:
+        pids = set()
+        for part in override.split(","):
+            try:
+                pids.add(int(part))
+            except ValueError:
+                continue  # skip junk; the seam is best-effort too
+        return pids
+
+    def norm(addr):
+        addr = addr.lower()
+        if addr.startswith("0x"):
+            addr = addr[2:]
+        return addr.lstrip("0")
+
+    try:
+        out = subprocess.check_output(["lsof", "-U", "-Fpcdn"], text=True,
+                                      stderr=subprocess.DEVNULL)
+    except (subprocess.CalledProcessError, OSError):
+        return set()
+    pid = None
+    dev = None
+    control_addrs = set()   # socket addrs bound to a control.sock path
+    peer_addrs = {}         # pid -> addrs of the sockets it's connected to
+    for line in out.splitlines():
+        if not line:
+            continue
+        tag, val = line[0], line[1:]
+        if tag == "p":
+            try:
+                pid = int(val)
+            except ValueError:
+                pid = None
+            dev = None
+        elif tag == "d":
+            dev = val
+        elif tag == "n":
+            if val.startswith("->0x"):
+                if pid is not None:
+                    peer_addrs.setdefault(pid, set()).add(norm(val[2:]))
+            elif dev and "cc-daemon" in val and val.endswith("/control.sock"):
+                control_addrs.add(norm(dev))
+            dev = None
+    return {p for p, addrs in peer_addrs.items() if addrs & control_addrs}
+
+
+def reconcile_viewer(session, viewers):
+    """Stamp/clear the session's viewer flag; True when it changed."""
+    if session.get("claudePid") in viewers:
+        if not session.get("viewer"):
+            session["viewer"] = True
+            return True
+    elif "viewer" in session:
+        del session["viewer"]
+        return True
+    return False
+
+
+def reconcile_session(path, session, viewers):
+    """Heal dormant session records against Claude Code's own.
+
+    Statusline-tracked: idle daemon sessions stop re-rendering their
+    statusline, so a bridge record can be stuck at its last written status
+    forever — no refresh ever arrives to update it. The periodic scan
+    reconciles status/kind (same mapping as the bridge) and seeds the
+    label the same way. Writes only on an actual change: churning mtimes
+    every 10s would defeat the readers' staleness logic.
+
+    Hook-owned: hook events stay the status authority, but a dormant
+    session (e.g. a finished bg task whose last event already fired) may
+    never get its kind stamped — backfill just the kind, and only once
+    the file has been quiet for a minute so racing a live hook's
+    read-modify-write is effectively impossible. updatedAt stays put:
+    this is a classification fix, not activity, and bumping it would
+    un-stale a dormant session in the readers' sort.
+
+    Both flavors also reconcile the viewer flag (see viewer_claude_pids)
+    under the same ownership rules; a record changing kind and viewer at
+    once is still a single write.
+    """
+    session_id = session.get("sessionId")
+    if not session_id:
+        return
+
+    if session.get("trackedBy") != "statusline":
+        try:
+            if time.time() - os.path.getmtime(path) < 60:
+                return  # possibly live — never race a hook's write
+        except OSError:
+            return
+        changed = reconcile_viewer(session, viewers)
+        if "kind" not in session:
+            rec = claude_session_record(session_id, session.get("claudePid"))
+            if rec and rec.get("kind"):
+                session["kind"] = rec["kind"]
+                changed = True
+        if changed:
+            atomic_write(path, session)
+        return
+
+    changed = reconcile_viewer(session, viewers)
+    rec = claude_session_record(session_id, session.get("claudePid"))
+    if rec:
+        title = bg_task_title(rec)
+        if title and read_label(session_id) is None:
+            write_label(session_id, title)
+        status = "idle" if rec.get("status") == "idle" else "working"
+        kind = rec.get("kind") or session.get("kind")
+        if status != session.get("status") or kind != session.get("kind"):
+            session["status"] = status
+            if kind:
+                session["kind"] = kind
+            session["updatedAt"] = utcnow()
+            changed = True
+    if changed:
+        atomic_write(path, session)
+
+
 def scan():
     tracked_ttys = set()
     tracked_cwds = set()
+    viewers = None  # lazy: the lsof probe only pays off once a session
+                    # actually has a claudePid to match against
     for name in os.listdir(SESSIONS_DIR):
         if not name.endswith(".json"):
             continue
@@ -464,6 +679,9 @@ def scan():
             tracked_ttys.add(d["terminalTty"])
         if d.get("cwd"):
             tracked_cwds.add(d["cwd"])
+        if viewers is None and d.get("claudePid"):
+            viewers = viewer_claude_pids()
+        reconcile_session(os.path.join(SESSIONS_DIR, name), d, viewers or set())
 
     procs = process_table()
     prune_tombstones(procs)
@@ -610,6 +828,15 @@ def handle_event():
 
     # Any real hook event is activity — undo a "hide until next activity"
     clear_tombstones(session_id, session.get("claudePid"))
+
+    # Stamp the session kind (interactive vs bg task) from Claude Code's
+    # own record, once. Only kind: hook events are the status authority
+    # here, the record merely classifies the session. No record found?
+    # Leave kind unset and retry on the next event.
+    if "kind" not in session:
+        rec = claude_session_record(session_id, session.get("claudePid"))
+        if rec and rec.get("kind"):
+            session["kind"] = rec["kind"]
 
     status = None
     detail = session.get("statusDetail")

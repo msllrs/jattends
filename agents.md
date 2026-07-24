@@ -41,7 +41,7 @@ On `PermissionRequest`, the hook (if the app is running and `config.json` allows
 | View | Purpose |
 |------|---------|
 | `MenuBarIcon` | SVG-based menu bar icons (normal + badge variants) |
-| `PreferencesView` | Settings window — approvals, notifications, sound, keyboard shortcut |
+| `PreferencesView` | Settings window — application (background sessions, auto-clear), approvals, notifications, sound, keyboard shortcut |
 
 ## Build, install & test
 
@@ -89,6 +89,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test  # Swift tes
 | `alertSoundName` | String | `"Glass"` | Which system sound to play |
 | `soundRepeat` | Bool | `false` | Repeat sound until dismissed |
 | `autoClearMinutes` | Int | `0` | Auto-dismiss attention sessions after N minutes |
+| `backgroundSessions` | String | `"all"` | Background section visibility: `all` / `active` (working or compacting only) / `hidden`. Attention rows always surface |
 | `hotkeyEnabled` | Bool | `false` | Enable global keyboard shortcut |
 | `hotkeyKeyCode` | Int | `38` (J) | Key code for shortcut |
 | `hotkeyModifiers` | Int | Cmd+Shift | Modifier flags for shortcut |
@@ -110,23 +111,46 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test  # Swift tes
   "terminalPid": 12345,
   "terminalTty": "/dev/ttys000",
   "claudePid": 12346,
+  "kind": "bg",
   "updatedAt": "2026-07-20T00:00:00Z"
 }
 ```
 
 Status values, in sort/priority order: `approval`, `waiting`, `error`, `working`, `compacting`, `idle`. Legacy files may contain `active` (readers normalize it to `working`). All fields except `sessionId`, `cwd`, `status`, `updatedAt` are optional.
 
+`kind` is `"bg"` for sessions run by Claude Code's background-task daemon (the task-list/agents feature) and `"interactive"` for terminal sessions; absent means unknown (treat as interactive). The hook copies it from Claude Code's own per-process record (see "Claude Code session records" below).
+
+`viewer: true` marks a terminal claude currently connected to a background-task daemon's `control.sock` — it's displaying the task list or an attached task, so its window is already reachable via the named task rows. `--scan` stamps and clears it every cycle (lsof unix-socket probe; `JATTENDS_VIEWER_PIDS` env overrides for tests).
+
 Reader conventions both implementations follow:
 - Delete files that are stale (>24h), whose `terminalPid`/`claudePid` are dead, or (no `claudePid`) whose cwd has no live claude process
 - Dedupe by `claudePid`, keeping higher-priority status then most recent
 - Show `working`/`compacting` sessions older than 5 minutes as `idle`
 - Read `~/.claude/jattends/labels/{sessionId}` (plain text, see below) and title the session with it when present, keeping the cwd basename visible in the detail/subtitle
+- Group ANONYMOUS background sessions — `kind: "bg"` AND no label — into their own "Background" section, except attention states (`approval`/`waiting`/`error`), which surface with the other attention rows regardless. A NAMED background task is first-class and renders in the normal status groups: whether a task is currently open in a terminal window is not observable (statusline renders daemon-side, job state doesn't track attachment, socket traffic is multiplexed), and the name exists precisely when a human engaged with the task
+- Hide bare viewer terminals from the idle/Ready group: `viewer: true` AND idle AND no `lastPrompt` AND no label. Any prompt history, label, or non-idle status keeps the row visible
+
+## Claude Code session records
+
+Claude Code (verified on v2.1.218) maintains its own per-process records at `~/.claude/sessions/<pid>.json` — undocumented internals the hook treats as an optional enrichment source, never a requirement:
+
+```json
+{"pid": 4844, "sessionId": "abc-123", "kind": "bg", "name": "pr review #46498", "status": "idle", "cwd": "..."}
+```
+
+- `kind`: `interactive` | `bg` → copied to the session file's `kind`
+- `status`: `busy` | `idle` → the bridge maps `idle` → `idle`, anything else (busy/missing/unknown) → `working`
+- `name`: for `bg` sessions this is the task title, except unnamed tasks carry the session id's first 8 chars (skipped); for `interactive` sessions it's a slug like `lovable-7b` (never used)
+
+Lookup is by `<claudePid>.json` when the pid is known (validated against `sessionId`), else a scan of the directory for a matching `sessionId`. A missing directory or record degrades to pre-existing behavior. Related: `~/.claude/jobs/<short-id>/state.json` holds per-task state (`state: "done"`, `intent`, worktree) — currently unused, a candidate for a completed-task signal.
 
 ## Session labels
 
-`~/.claude/jattends/labels/{sessionId}` holds the session's Claude Code display name (auto-generated topic title, `/rename` name, or `--agent` name) as plain text — this is what distinguishes parallel sessions sharing one cwd. It's a sidecar file rather than a session-JSON field so its writer never races the hook's read-modify-write of the session file.
+`~/.claude/jattends/labels/{sessionId}` holds the session's Claude Code display name (auto-generated topic title, `/rename` name, background task title, or `--agent` name) as plain text — this is what distinguishes parallel sessions sharing one cwd. It's a sidecar file rather than a session-JSON field so its writer never races the hook's read-modify-write of the session file.
 
 Writers: the statusline bridge (`jattends-hook.py --statusline`, fed the statusLine payload by the user's statusline command — the only live source of `session_name`) and `SessionStart`'s optional `session_title`. `SessionEnd` removes the label; `--scan` prunes labels without a session file. Approval requests snapshot it as `sessionName`.
+
+Label precedence in the bridge: `session_name` from the payload always wins; when it's absent and no label exists yet, the bg task title from the Claude Code session record is used, then the payload's `agent.name` (skipping the catch-all `"claude"`).
 
 Statusline bridge hookup (one line in the user's statusline script; must run in the FOREGROUND — Claude Code reaps the statusline's process group on exit, so a backgrounded child dies before Python starts):
 
@@ -136,7 +160,7 @@ echo "$input" | ~/.claude/hooks/jattends-hook.py --statusline >/dev/null 2>&1 ||
 
 ## Statusline-tracked sessions
 
-The agents feature runs sessions under a background pty daemon (`claude.exe`, `claude bg-pty-host`/`bg-spare` processes) whose hook events never fire — but their statusline does. The bridge therefore also registers any session without a hook-written record: it writes a session file with `trackedBy: "statusline"`, `status: "working"`, `updatedAt: now` (throttled to one rewrite per 5s), plus `claudePid`/terminal info from the process-tree walk and `lastPrompt` from the transcript's first real user message (bounded read).
+The agents feature runs sessions under a background pty daemon (`claude.exe`, `claude bg-pty-host`/`bg-spare` processes) whose hook events never fire — but their statusline does. The bridge therefore also registers any session without a hook-written record: it writes a session file with `trackedBy: "statusline"`, `updatedAt: now` (throttled to one rewrite per 5s), plus `claudePid`/terminal info from the process-tree walk and `lastPrompt` from the transcript's first real user message (bounded read). `status` comes from the Claude Code session record's busy/idle when one matches (see above), else `"working"` while refreshes keep arriving.
 
 Ownership rules: the bridge never touches a record without the `trackedBy` marker; any real hook event pops the marker and takes over. Status semantics for bridge sessions are coarse — "working while refreshes keep arriving" — and the readers' existing 5-minute quiet timeout downgrades them to ready. Dismissal tombstones are respected (the refresh loop doesn't count as activity). Readers match claude processes as `claude`, `claude.exe`, or `claude *` (pty hosts).
 
