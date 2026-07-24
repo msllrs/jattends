@@ -12,7 +12,7 @@ Single Raycast command ("Switch Claude Session") that lists all active Claude Co
 2. Extension reads all `*.json` files via Node `fs` on each open
 3. Filters stale (>24h) and dead-PID sessions (cleans up files)
 4. Deduplicates by TTY (same TTY = same terminal, keep most recent) and subdirectory
-5. Groups by status: Waiting → Working → Ready
+5. Groups by status: Waiting → Working → Ready. Anonymous sessions with `kind: "bg"` (background-task daemon, no label) go into a separate "Background" section rendered after the status sections — except attention states (`approval`/`waiting`/`error`), which stay with the other attention rows. Labeled bg sessions group by status like terminal sessions
 6. On Enter: activates the terminal window via OSC title marker or AppleScript fallback
 
 ### Key file
@@ -40,11 +40,16 @@ Written by `jattends-hook.sh` to `~/.claude/jattends/sessions/{sessionId}.json`:
   "terminalApp": "ghostty",
   "terminalPid": 12345,
   "terminalTty": "/dev/ttys000",
+  "kind": "bg",
   "updatedAt": "2026-02-26T00:00:00Z"
 }
 ```
 
 Status values: `waiting` (needs attention), `active` (Claude working), `idle` (ready for input).
+
+`kind` (optional): `"bg"` for sessions run by Claude Code's background-task daemon, `"interactive"` for terminal sessions; absent means interactive (legacy files). Anonymous non-attention `bg` sessions (no label) render in their own "Background" section; a *named* bg task is first-class and groups by status like a terminal session. Rationale: tasks the user opened in a terminal window are indistinguishable from headless ones (there is no observable attachment signal), so the name — which exists precisely when a human engaged with the task — is the classification. See the repo root's `agents.md` ("Session JSON contract") for the authoritative format.
+
+`viewer` (optional): `true` when the terminal is displaying Claude Code's background-task UI rather than a conversation. A *bare* viewer — `viewer: true` with status `idle`, no `lastPrompt`, and no label — is hidden from the list entirely; any prompt history, label, or non-idle status keeps the row visible. Absent means normal session (legacy files).
 
 ## Session statuses
 

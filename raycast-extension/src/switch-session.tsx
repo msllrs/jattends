@@ -24,6 +24,10 @@ interface SessionInfo {
   permissionMode?: string;
   transcriptPath?: string;
   subagentCount?: number;
+  /** "bg" for Claude Code background-task daemon sessions, "interactive" for terminal sessions; absent = interactive. */
+  kind?: "bg" | "interactive";
+  /** True when this terminal is displaying Claude Code's background-task UI rather than a conversation. */
+  viewer?: boolean;
 }
 
 interface ParsedSession extends SessionInfo {
@@ -53,6 +57,9 @@ const STATUS_ORDER: Record<SessionStatus, number> = {
   compacting: 4,
   idle: 5,
 };
+
+/** Statuses that need the user's attention — these always surface in the per-status sections, even for bg sessions. */
+const ATTENTION_STATUSES: ReadonlySet<SessionStatus> = new Set(["approval", "waiting", "error"]);
 
 const STATUS_CONFIG: Record<SessionStatus, { label: string; color: string; icon: Icon }> = {
   approval: { label: "Needs Approval", color: "#ff9502", icon: Icon.ExclamationMark },
@@ -194,6 +201,12 @@ async function loadSessions(): Promise<ParsedSession[]> {
         sessionName = (await readFile(join(LABELS_DIR, raw.sessionId), "utf-8")).trim() || undefined;
       } catch {
         /* no label written yet */
+      }
+
+      // Hide bare viewers: terminals only displaying the background-task UI, with
+      // no prompt history, no label, and nothing needing attention
+      if (raw.viewer === true && effectiveStatus === "idle" && !raw.lastPrompt && !sessionName) {
+        continue;
       }
 
       sessions.push({
@@ -416,6 +429,38 @@ return "not_found"`;
 
 // --- Command ---
 
+function SessionItem({ session }: { session: ParsedSession }) {
+  const config = STATUS_CONFIG[session.status];
+  return (
+    <List.Item
+      title={displayName(session)}
+      subtitle={[
+        session.sessionName ? session.projectName : null,
+        session.statusDetail ?? session.lastPrompt ?? session.cwd,
+      ]
+        .filter(Boolean)
+        .join(" · ")}
+      keywords={[
+        session.sessionId,
+        session.cwd,
+        session.projectName,
+        session.sessionName ?? "",
+        session.lastPrompt ?? "",
+      ]}
+      icon={{ source: config.icon, tintColor: config.color }}
+      accessories={[
+        ...(session.subagentCount ? [{ tag: `⑂ ${session.subagentCount}` }] : []),
+        { tag: { value: config.label, color: config.color } },
+      ]}
+      actions={
+        <ActionPanel>
+          <Action title="Switch to Session" onAction={() => activateSession(session)} />
+        </ActionPanel>
+      }
+    />
+  );
+}
+
 export default function SwitchSession() {
   const { data: sessions, isLoading } = usePromise(loadSessions);
 
@@ -428,8 +473,17 @@ export default function SwitchSession() {
     idle: [],
   };
 
+  // Anonymous background-daemon sessions get their own section. Named bg tasks are
+  // first-class (the label means a human engaged with the task) and group by status
+  // like terminal sessions, as do bg sessions needing attention
+  const background: ParsedSession[] = [];
+
   for (const s of sessions ?? []) {
-    grouped[s.status].push(s);
+    if (s.kind === "bg" && !s.sessionName && !ATTENTION_STATUSES.has(s.status)) {
+      background.push(s);
+    } else {
+      grouped[s.status].push(s);
+    }
   }
 
   const sections: { status: SessionStatus; items: ParsedSession[] }[] = (
@@ -442,40 +496,18 @@ export default function SwitchSession() {
     <List isLoading={isLoading} searchBarPlaceholder="Search sessions...">
       {sections.map(({ status, items }) => (
         <List.Section key={status} title={STATUS_CONFIG[status].label}>
-          {items.map((session) => {
-            const config = STATUS_CONFIG[session.status];
-            return (
-              <List.Item
-                key={session.sessionId}
-                title={displayName(session)}
-                subtitle={[
-                  session.sessionName ? session.projectName : null,
-                  session.statusDetail ?? session.lastPrompt ?? session.cwd,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-                keywords={[
-                  session.sessionId,
-                  session.cwd,
-                  session.projectName,
-                  session.sessionName ?? "",
-                  session.lastPrompt ?? "",
-                ]}
-                icon={{ source: config.icon, tintColor: config.color }}
-                accessories={[
-                  ...(session.subagentCount ? [{ tag: `⑂ ${session.subagentCount}` }] : []),
-                  { tag: { value: config.label, color: config.color } },
-                ]}
-                actions={
-                  <ActionPanel>
-                    <Action title="Switch to Session" onAction={() => activateSession(session)} />
-                  </ActionPanel>
-                }
-              />
-            );
-          })}
+          {items.map((session) => (
+            <SessionItem key={session.sessionId} session={session} />
+          ))}
         </List.Section>
       ))}
+      {background.length > 0 && (
+        <List.Section title="Background">
+          {background.map((session) => (
+            <SessionItem key={session.sessionId} session={session} />
+          ))}
+        </List.Section>
+      )}
     </List>
   );
 }
