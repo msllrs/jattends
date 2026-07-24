@@ -70,19 +70,62 @@ final class SessionStore {
         }
     }
 
+    /// Only sessions needing attention (approval, waiting, error) —
+    /// background sessions included, attention always surfaces.
+    static func waitingGroup(_ sessions: [SessionInfo]) -> [SessionInfo] {
+        sessions.filter { $0.status.needsAttention }
+    }
+
+    /// Sessions Claude is actively working in. Only anonymous background
+    /// sessions are excluded — a named task is first-class (the user engaged
+    /// with it; window attachment itself isn't observable).
+    static func workingGroup(_ sessions: [SessionInfo]) -> [SessionInfo] {
+        sessions.filter { ($0.status == .working || $0.status == .compacting) && !$0.isAnonymousBackground }
+    }
+
+    /// Sessions with nothing happening. Only anonymous background sessions
+    /// are excluded — named tasks are first-class — and bare viewer
+    /// terminals are already represented by the named Background task rows.
+    static func idleGroup(_ sessions: [SessionInfo]) -> [SessionInfo] {
+        sessions.filter { $0.status == .idle && !$0.isAnonymousBackground && !$0.isBareViewer }
+    }
+
+    /// Anonymous background sessions shown in the Background group, per the
+    /// "backgroundSessions" setting: "hidden" shows none, "active" only
+    /// working/compacting, anything else all of them. Named tasks never
+    /// appear here — they live in the normal groups — and attention-needing
+    /// ones live in the waiting group. Preserves order.
+    static func visibleBackground(_ sessions: [SessionInfo], mode: String) -> [SessionInfo] {
+        guard mode != "hidden" else { return [] }
+        return sessions.filter { session in
+            guard session.isAnonymousBackground, !session.status.needsAttention else { return false }
+            if mode == "active" {
+                return session.status == .working || session.status == .compacting
+            }
+            return true
+        }
+    }
+
     /// Only sessions needing attention (approval, waiting, error).
     var waitingSessions: [SessionInfo] {
-        sessions.filter { $0.status.needsAttention }
+        Self.waitingGroup(sessions)
     }
 
     /// Sessions Claude is actively working in.
     var workingSessions: [SessionInfo] {
-        sessions.filter { $0.status == .working || $0.status == .compacting }
+        Self.workingGroup(sessions)
     }
 
     /// Sessions with nothing happening.
     var idleSessions: [SessionInfo] {
-        sessions.filter { $0.status == .idle }
+        Self.idleGroup(sessions)
+    }
+
+    /// Background-task sessions to show, honoring the visibility setting.
+    var backgroundSessions: [SessionInfo] {
+        Self.visibleBackground(
+            sessions,
+            mode: UserDefaults.standard.string(forKey: "backgroundSessions") ?? "all")
     }
 
     var waitingCount: Int {

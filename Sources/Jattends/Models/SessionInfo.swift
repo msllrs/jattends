@@ -8,6 +8,12 @@ struct SessionInfo: Codable, Identifiable {
     /// injected by SessionStore from the labels/ sidecar — not part of the
     /// session JSON itself.
     var sessionName: String?
+    /// "bg" for daemon-run background task sessions, "interactive" for
+    /// terminal ones; absent in legacy files, treated as interactive.
+    let kind: String?
+    /// True for a terminal claude connected to the background-task daemon
+    /// (task list or attached task); absent in legacy files.
+    let viewer: Bool?
     let terminalApp: String?
     let terminalPid: Int?
     let terminalTty: String?
@@ -25,6 +31,8 @@ struct SessionInfo: Codable, Identifiable {
         cwd: String,
         status: SessionStatus,
         sessionName: String? = nil,
+        kind: String? = nil,
+        viewer: Bool? = nil,
         terminalApp: String? = nil,
         terminalPid: Int? = nil,
         terminalTty: String? = nil,
@@ -41,6 +49,8 @@ struct SessionInfo: Codable, Identifiable {
         self.cwd = cwd
         self.status = status
         self.sessionName = sessionName
+        self.kind = kind
+        self.viewer = viewer
         self.terminalApp = terminalApp
         self.terminalPid = terminalPid
         self.terminalTty = terminalTty
@@ -64,6 +74,20 @@ struct SessionInfo: Codable, Identifiable {
     }
 
     var id: String { sessionId }
+
+    /// Whether this session runs under the background-task daemon.
+    var isBackground: Bool { kind == "bg" }
+
+    /// A daemon session the user hasn't engaged with — no name means no
+    /// typed intent and no task title. Named tasks are first-class sessions
+    /// for display (window attachment itself isn't observable). Relies on
+    /// sessionName being injected from the labels sidecar before grouping.
+    var isAnonymousBackground: Bool { isBackground && sessionName == nil }
+
+    /// A viewer terminal that was never used as a real session (no prompt
+    /// history, no name) — its window is already represented by the named
+    /// Background task rows. Status is the group filter's concern, not ours.
+    var isBareViewer: Bool { viewer == true && lastPrompt == nil && sessionName == nil }
 
     /// Derive a short project name from the working directory.
     var projectName: String {

@@ -338,8 +338,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let waiting = SessionStore.hidingPendingApprovals(store.waitingSessions, approvalSessionIds: approvalSessionIds)
         let working = SessionStore.hidingPendingApprovals(store.workingSessions, approvalSessionIds: approvalSessionIds)
         let idle = SessionStore.hidingPendingApprovals(store.idleSessions, approvalSessionIds: approvalSessionIds)
+        let background = SessionStore.hidingPendingApprovals(store.backgroundSessions, approvalSessionIds: approvalSessionIds)
 
-        if approvals.isEmpty && waiting.isEmpty && working.isEmpty && idle.isEmpty {
+        if approvals.isEmpty && waiting.isEmpty && working.isEmpty && idle.isEmpty && background.isEmpty {
             let item = NSMenuItem(title: "No Claude sessions", action: nil, keyEquivalent: "")
             item.isEnabled = false
             menu.addItem(item)
@@ -406,6 +407,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             header.isEnabled = false
             menu.addItem(header)
             addSessionItems(idle, to: menu)
+        }
+
+        if !background.isEmpty {
+            if !waiting.isEmpty || !working.isEmpty || !idle.isEmpty { menu.addItem(NSMenuItem.separator()) }
+            let header = NSMenuItem(title: "Background", action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            menu.addItem(header)
+            addSessionItems(background, to: menu)
         }
 
         menu.addItem(NSMenuItem.separator())
