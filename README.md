@@ -12,7 +12,7 @@ cd jattends
 bash scripts/install.sh
 ```
 
-Grant **Accessibility** permission when prompted — this lets Jattends raise the correct terminal window when you click a session.
+Grant **Accessibility** permission when prompted — this lets Jattends raise the correct terminal window when you click a session. The first time you click a Ghostty, iTerm2, or Terminal.app session you'll also get a one-time **Automation** prompt for that app — allow it and Jattends can focus the exact split pane or tab.
 
 ## How it works
 
