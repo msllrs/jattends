@@ -345,6 +345,94 @@ async function activateSession(session: ParsedSession): Promise<void> {
   const tty =
     session.terminalTty && session.terminalTty !== "not a tty" ? session.terminalTty : findTtyForSession(session.cwd);
 
+  // Strategy 0a: tty-exact pane focus — iTerm2 split panes and Terminal.app
+  // tabs are scriptable objects with a `tty` property, so the session's pane
+  // is an exact lookup with no title heuristics at all.
+  if (tty && (appName === "iTerm2" || appName === "Terminal")) {
+    const script =
+      appName === "iTerm2"
+        ? `
+tell application "iTerm2"
+  repeat with w in windows
+    repeat with t in tabs of w
+      repeat with s in sessions of t
+        if tty of s is "${tty}" then
+          select s
+          select t
+          try
+            set miniaturized of w to false
+          end try
+          select w
+          activate
+          return "found"
+        end if
+      end repeat
+    end repeat
+  end repeat
+  return "not_found"
+end tell`
+        : `
+tell application "Terminal"
+  repeat with w in windows
+    repeat with t in tabs of w
+      if tty of t is "${tty}" then
+        set selected of t to true
+        try
+          set miniaturized of w to false
+        end try
+        -- \`set index of w to 1\` reorders the AppleScript list without raising the window; frontmost does
+        set frontmost of w to true
+        activate
+        return "found"
+      end if
+    end repeat
+  end repeat
+  return "not_found"
+end tell`;
+    try {
+      if ((await runAppleScript(script)) === "found") {
+        await closeMainWindow();
+        return;
+      }
+    } catch {
+      // scripting failed, fall through to marker strategies
+    }
+  }
+
+  // Strategy 0: Ghostty scripting (1.3+) — every split surface is exposed to
+  // AppleScript with its own title and a `focus` command that raises the
+  // exact split. Window titles only carry the *focused* split's title, so
+  // the window-level marker pass below can't find a session sitting in a
+  // background split — this one can.
+  if (tty && appName === "Ghostty") {
+    const marker = `__jattends_${session.sessionId.slice(0, 8)}__`;
+    try {
+      // Set a unique surface title via OSC 2
+      execFileSync("bash", ["-c", `printf '\\e]2;${marker}\\a' > ${tty}`], { timeout: 2000 });
+      // Brief pause for the terminal to process the escape sequence
+      await new Promise((r) => setTimeout(r, 100));
+
+      const script = `
+tell application "Ghostty"
+  try
+    focus (first terminal whose name contains "${marker}")
+    activate
+    return "found"
+  end try
+  return "not_found"
+end tell`;
+      const result = await runAppleScript(script);
+      // Reset the title (empty OSC 2 tells the terminal to use its default)
+      execFileSync("bash", ["-c", `printf '\\e]2;\\a' > ${tty}`], { timeout: 2000 });
+      if (result === "found") {
+        await closeMainWindow();
+        return;
+      }
+    } catch {
+      // Ghostty scripting failed (older Ghostty?), fall through
+    }
+  }
+
   // Strategy 1: If we have the TTY, write a unique OSC title marker to it,
   // then find the window with that title via System Events. Works with any
   // terminal that supports OSC 2 (window title) — Ghostty, iTerm2, kitty, etc.
