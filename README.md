@@ -26,7 +26,7 @@ Jattends uses Claude Code [hooks](https://docs.anthropic.com/en/docs/claude-code
 - **Live session states** — needs approval, waiting, error, working (with what it's doing: "Running: npm test", "Editing: Store.swift"), compacting, ready
 - **Session names** — rows title with Claude Code's session name ("fix scroll overlay gaps") instead of just the folder name, so ten sessions in one repo stay tellable apart (needs the optional [statusline bridge](#session-names-optional))
 - **Menubar badge** — see at a glance when any session needs you
-- **Terminal focus** — click a session to raise the exact window/tab (OSC 2 title tagging, so two sessions in the same project resolve correctly)
+- **Terminal focus** — click a session to raise the exact window/tab (OSC 2 title tagging, so two sessions in the same project resolve correctly). Ghostty 1.3+ and iTerm2 focus the exact **split pane**, Terminal.app the exact tab (grant the Automation permission when prompted)
 - **Dismiss** — Option+click a session to dismiss it, or Option+click the header to clear all
 - **Notifications** — native macOS notifications with the session's status and detail
 - **Sound alerts** — play a system sound, with an option to repeat until dismissed
