@@ -62,6 +62,70 @@ final class TerminalActivatorTests: XCTestCase {
             titles: ["unrelated", "other"], for: plain))
     }
 
+    /// Ghostty splits: the needle-based pass may only run for sessions that
+    /// live in Ghostty or have no known terminal (agent sessions) — a
+    /// session in iTerm2 must not focus Ghostty on a title coincidence.
+    func testGhosttyNeedlePassGating() {
+        func session(_ app: String?) -> SessionInfo {
+            SessionInfo(sessionId: "s", cwd: "/tmp/p", status: .idle, terminalApp: app)
+        }
+        XCTAssertTrue(TerminalActivator.ghosttyNeedlePassAllowed(for: session("ghostty")))
+        XCTAssertTrue(TerminalActivator.ghosttyNeedlePassAllowed(for: session(nil)))
+        XCTAssertTrue(TerminalActivator.ghosttyNeedlePassAllowed(for: session("unknown")))
+        XCTAssertFalse(TerminalActivator.ghosttyNeedlePassAllowed(for: session("iTerm2")))
+        XCTAssertFalse(TerminalActivator.ghosttyNeedlePassAllowed(for: session("Apple_Terminal")))
+    }
+
+    /// Needles and paths are interpolated into AppleScript string literals —
+    /// quotes and backslashes must be escaped or the script won't compile
+    /// (or worse, a session name could inject script).
+    func testAppleScriptQuotingEscapesQuotesAndBackslashes() {
+        XCTAssertEqual(TerminalActivator.appleScriptQuoted(#"say "hi" \now"#),
+                       #""say \"hi\" \\now""#)
+        XCTAssertEqual(TerminalActivator.appleScriptQuoted("plain"), "\"plain\"")
+    }
+
+    /// The focus script tries needles in order (most specific first), falls
+    /// back to the working directory, and reports not_found so a miss can
+    /// fall through to the next activation strategy.
+    func testGhosttyFocusScriptStructure() {
+        let src = TerminalActivator.ghosttyFocusScriptSource(
+            needles: ["fix scroll", "proj"], cwd: "/tmp/proj")
+        XCTAssertTrue(src.hasPrefix("tell application \"Ghostty\""))
+        XCTAssertTrue(src.contains("name contains \"fix scroll\""))
+        XCTAssertTrue(src.contains("name contains \"proj\""))
+        XCTAssertTrue(src.contains("working directory is \"/tmp/proj\""))
+        XCTAssertTrue(src.contains("return \"not_found\""))
+        // Needle order preserved: session name attempted before project name
+        let nameIdx = src.range(of: "fix scroll")!.lowerBound
+        let projIdx = src.range(of: "name contains \"proj\"")!.lowerBound
+        XCTAssertLessThan(nameIdx, projIdx)
+        // Marker-style calls omit the cwd fallback entirely
+        let markerSrc = TerminalActivator.ghosttyFocusScriptSource(needles: ["__jattends_abc__"])
+        XCTAssertFalse(markerSrc.contains("working directory"))
+    }
+
+    /// tty-exact pane focus exists only for apps whose scripting API
+    /// exposes ttys: iTerm2 (split panes) and Terminal.app (tabs). Everyone
+    /// else — including Ghostty, which is handled by the marker pass — must
+    /// return nil so no Apple event goes to an app that can't answer it.
+    func testTtyFocusScriptOnlyForTtyExposingApps() {
+        let iterm = TerminalActivator.ttyFocusScriptSource(appName: "iTerm2", tty: "/dev/ttys005")
+        XCTAssertNotNil(iterm)
+        XCTAssertTrue(iterm!.hasPrefix("tell application \"iTerm2\""))
+        XCTAssertTrue(iterm!.contains("tty of s is \"/dev/ttys005\""))
+        XCTAssertTrue(iterm!.contains("return \"not_found\""))
+
+        let terminal = TerminalActivator.ttyFocusScriptSource(appName: "Terminal", tty: "/dev/ttys005")
+        XCTAssertNotNil(terminal)
+        XCTAssertTrue(terminal!.hasPrefix("tell application \"Terminal\""))
+        XCTAssertTrue(terminal!.contains("tty of t is \"/dev/ttys005\""))
+
+        XCTAssertNil(TerminalActivator.ttyFocusScriptSource(appName: "Ghostty", tty: "/dev/ttys005"))
+        XCTAssertNil(TerminalActivator.ttyFocusScriptSource(appName: "kitty", tty: "/dev/ttys005"))
+        XCTAssertNil(TerminalActivator.ttyFocusScriptSource(appName: nil, tty: "/dev/ttys005"))
+    }
+
     /// The cross-app window search must only ever touch terminal apps.
     func testWindowSearchAppsAreTheMappedTerminals() {
         XCTAssertTrue(TerminalActivator.knownTerminalAppNames.contains("Ghostty"))

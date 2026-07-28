@@ -51,6 +51,26 @@ enum TerminalActivator {
             AXIsProcessTrustedWithOptions(opts)
         }
 
+        // Most precise where the app's scripting API exposes ttys directly:
+        // iTerm2 split panes and Terminal.app tabs are scriptable objects
+        // with a `tty` property, so the session's pane is an exact lookup —
+        // no title heuristics at all.
+        if activatePaneByTty(session: session) {
+            log("  -> tty pane matched")
+            return
+        }
+
+        // Most precise for Ghostty: its scripting dictionary (1.3+) exposes
+        // every split surface with its own title and a `focus` command that
+        // raises the exact split. Window titles only carry the *focused*
+        // split's title, so no window-level pass can find a session sitting
+        // in a background split — this one can. The unique tty marker makes
+        // false positives impossible, so it's safe to try for any session.
+        if activateGhosttySplitByMarker(session: session) {
+            log("  -> Ghostty split marker matched")
+            return
+        }
+
         // Most precise: tag the session's tty with a unique window title via
         // OSC 2, raise the window carrying it, then restore the title. Finds
         // the exact tab even with several sessions in the same project.
@@ -70,6 +90,16 @@ enum TerminalActivator {
         // every known terminal app's windows for it.
         if activateByTitleSearch(session: session) {
             log("  -> window title search matched")
+            return
+        }
+
+        // Ghostty again, by title/cwd needles this time — for sessions whose
+        // tty marker couldn't be written (agent sessions have no tty). Only
+        // when the session is known to live in Ghostty or has no known
+        // terminal at all; a session in another app shouldn't focus Ghostty
+        // just because a surface title resembles the project name.
+        if ghosttyNeedlePassAllowed(for: session), activateGhosttySplitByNeedles(session: session) {
+            log("  -> Ghostty split title matched")
             return
         }
 
@@ -118,6 +148,177 @@ enum TerminalActivator {
             }
         }
         return nil
+    }
+
+    // MARK: - tty-exact pane focus (iTerm2 split panes, Terminal.app tabs)
+
+    /// AppleScript that selects the pane/tab owning `tty` and raises its
+    /// window, or nil for apps whose scripting API doesn't expose ttys.
+    /// iTerm2 models each split pane as a `session` with a `tty` property;
+    /// Terminal.app models each tab likewise (it has no splits).
+    static func ttyFocusScriptSource(appName: String?, tty: String) -> String? {
+        let quotedTty = appleScriptQuoted(tty)
+        switch appName {
+        case "iTerm2":
+            return """
+            tell application "iTerm2"
+                repeat with w in windows
+                    repeat with t in tabs of w
+                        repeat with s in sessions of t
+                            if tty of s is \(quotedTty) then
+                                select s
+                                select t
+                                try
+                                    set miniaturized of w to false
+                                end try
+                                select w
+                                activate
+                                return "found"
+                            end if
+                        end repeat
+                    end repeat
+                end repeat
+                return "not_found"
+            end tell
+            """
+        case "Terminal":
+            return """
+            tell application "Terminal"
+                repeat with w in windows
+                    repeat with t in tabs of w
+                        if tty of t is \(quotedTty) then
+                            set selected of t to true
+                            try
+                                set miniaturized of w to false
+                            end try
+                            -- `set index of w to 1` reorders the AppleScript
+                            -- list without raising the window; frontmost does
+                            set frontmost of w to true
+                            activate
+                            return "found"
+                        end if
+                    end repeat
+                end repeat
+                return "not_found"
+            end tell
+            """
+        default:
+            return nil
+        }
+    }
+
+    /// Select the exact pane/tab owning the session's tty, for terminals
+    /// whose scripting API exposes ttys. Gated to the session's own app so
+    /// no Apple event (and no Automation consent prompt) goes anywhere else,
+    /// and to running apps so a stale session can't cold-launch a terminal.
+    private static func activatePaneByTty(session: SessionInfo) -> Bool {
+        guard let tty = session.terminalTty, tty.hasPrefix("/dev/"),
+              let appName = appleScriptTarget(session.terminalApp),
+              let source = ttyFocusScriptSource(appName: appName, tty: tty),
+              isAppRunning(named: appName)
+        else { return false }
+        return runFocusScript(source, label: "tty pane")
+    }
+
+    // MARK: - Ghostty split focus (scripting dictionary, Ghostty 1.3+)
+
+    /// Whether the needle-based Ghostty pass may run: the session lives in
+    /// Ghostty, or its terminal is unknown (agent sessions). Sessions mapped
+    /// to another app must not focus Ghostty on a coincidental title match.
+    static func ghosttyNeedlePassAllowed(for session: SessionInfo) -> Bool {
+        let target = appleScriptTarget(session.terminalApp)
+        return target == "Ghostty" || target == nil
+    }
+
+    /// Escape a string for interpolation inside AppleScript double quotes.
+    static func appleScriptQuoted(_ s: String) -> String {
+        "\"" + s.replacingOccurrences(of: "\\", with: "\\\\")
+               .replacingOccurrences(of: "\"", with: "\\\"") + "\""
+    }
+
+    /// AppleScript that focuses the first Ghostty surface whose title
+    /// contains one of the needles (tried in order), optionally falling back
+    /// to a working-directory match. Each attempt is wrapped in `try`
+    /// because `first terminal whose …` throws when nothing matches.
+    static func ghosttyFocusScriptSource(needles: [String], cwd: String? = nil) -> String {
+        var attempts = needles.map { needle in
+            """
+                try
+                    focus (first terminal whose name contains \(appleScriptQuoted(needle)))
+                    activate
+                    return "found"
+                end try
+            """
+        }
+        if let cwd {
+            attempts.append("""
+                try
+                    focus (first terminal whose working directory is \(appleScriptQuoted(cwd)))
+                    activate
+                    return "found"
+                end try
+            """)
+        }
+        return """
+        tell application "Ghostty"
+        \(attempts.joined(separator: "\n"))
+            return "not_found"
+        end tell
+        """
+    }
+
+    private static func ghosttyIsRunning() -> Bool {
+        isAppRunning(named: "Ghostty")
+    }
+
+    private static func isAppRunning(named name: String) -> Bool {
+        NSWorkspace.shared.runningApplications.contains { $0.localizedName == name }
+    }
+
+    private static func runFocusScript(_ source: String, label: String) -> Bool {
+        guard let script = NSAppleScript(source: source) else {
+            log("  \(label) script: failed to init NSAppleScript")
+            return false
+        }
+        var error: NSDictionary?
+        let result = script.executeAndReturnError(&error)
+        if let error {
+            log("  \(label) script error: \(error[NSAppleScript.errorBriefMessage] ?? error)")
+            return false
+        }
+        if result.stringValue != "found" {
+            log("  \(label) script: \(result.stringValue ?? "no result")")
+        }
+        return result.stringValue == "found"
+    }
+
+    /// Tag the session's tty with a unique title via OSC 2, then focus the
+    /// Ghostty surface carrying it. Surfaces keep their own titles, so this
+    /// finds the session's split even when it isn't the focused one.
+    private static func activateGhosttySplitByMarker(session: SessionInfo) -> Bool {
+        guard ghosttyIsRunning(),
+              let tty = session.terminalTty, tty.hasPrefix("/dev/")
+        else { return false }
+
+        let marker = "__jattends_\(session.sessionId.prefix(8))__"
+        guard writeToTty(tty, "\u{1B}]2;\(marker)\u{07}") else {
+            log("  Ghostty split: tty write failed for \(tty)")
+            return false
+        }
+        defer { _ = writeToTty(tty, "\u{1B}]2;\u{07}") } // restore default title
+
+        // Give Ghostty a moment to process the escape sequence
+        usleep(120_000)
+
+        return runFocusScript(ghosttyFocusScriptSource(needles: [marker]), label: "Ghostty split")
+    }
+
+    /// Focus a Ghostty surface by session-name/project-name title match or
+    /// working directory — for sessions whose tty we can't tag.
+    private static func activateGhosttySplitByNeedles(session: SessionInfo) -> Bool {
+        guard ghosttyIsRunning() else { return false }
+        return runFocusScript(ghosttyFocusScriptSource(
+            needles: titleMatchNeedles(for: session), cwd: session.cwd), label: "Ghostty split")
     }
 
     // MARK: - Cross-app window title search (for sessions without a terminal PID)
