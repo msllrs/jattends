@@ -35,7 +35,12 @@ IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
     | head -1 | tr -d '"')
 if [ -n "$IDENTITY" ]; then
     echo "Signing with: $IDENTITY"
-    codesign --force --options runtime --sign "$IDENTITY" "$APP_DIR"
+    # The entitlements matter: hardened runtime (--options runtime) denies
+    # all outgoing Apple events — silently, with no consent prompt — unless
+    # the automation.apple-events entitlement is present.
+    codesign --force --options runtime \
+        --entitlements "$PROJECT_DIR/Resources/Jattends.entitlements" \
+        --sign "$IDENTITY" "$APP_DIR"
 else
     echo "Signing (ad-hoc — Accessibility grant will not survive rebuilds)..."
     codesign --force --sign - "$APP_DIR"

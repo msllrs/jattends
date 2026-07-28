@@ -17,11 +17,13 @@
 	<key>CFBundleShortVersionString</key>
 	<string>1.2.0</string>
 	<key>CFBundleVersion</key>
-	<string>46</string>
+	<string>50</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Jattends focuses the terminal window, tab, or split running the Claude Code session you click.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright 2025. All rights reserved.</string>
 </dict>
