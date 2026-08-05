@@ -131,8 +131,8 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
             content.body = "The Mac stays awake until Claude's done, then sleeps."
             content.categoryIdentifier = Self.keepAwakeCategoryIdentifier
         case .stopped:
-            content.title = "Clamshellmaxx off"
-            content.body = "Normal sleep restored."
+            content.title = "Clamshellmaxxing disabled"
+            content.body = "Close to sleep restored"
         case .failed:
             content.title = "Clamshellmaxx unchanged"
             content.body = "The administrator authorization was cancelled or failed."
