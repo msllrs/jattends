@@ -429,34 +429,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(NSMenuItem.separator())
 
         if KeepAwakeController.scriptExists {
-            let title = "Stay Awake Until Claude's Done"
+            let title = "Clamshellmaxx"
             let item = NSMenuItem(title: title, action: #selector(toggleKeepAwake), keyEquivalent: "")
             item.target = self
             if KeepAwakeController.shared.actionInFlight {
-                // Password dialog still up — a reopened menu should explain
-                // why the row can't be clicked again yet.
+                // Password dialog still up — the row can't be clicked again yet.
                 item.isEnabled = false
                 item.action = nil
-                item.view = MenuRowView(text: Self.makeMenuItemTitle(
-                    symbol: "◐",
-                    color: .secondaryLabelColor,
-                    title: title,
-                    detail: "Waiting for your password\u{2026}"
-                ))
+                item.view = MenuRowView(text: MenuRowView.plainTitle(title), trailing: "\u{2026}")
             } else if KeepAwakeController.shared.isRunning {
-                item.view = MenuRowView(text: Self.makeMenuItemTitle(
-                    symbol: "●",
-                    color: .systemGreen,
-                    title: "Staying Awake for Claude",
-                    detail: "Sleeps after 5 quiet minutes — click to stop"
-                ))
+                item.view = MenuRowView(text: MenuRowView.plainTitle(title), trailing: "On")
             } else {
-                item.view = MenuRowView(text: Self.makeMenuItemTitle(
-                    symbol: "○",
-                    color: .tertiaryLabelColor,
-                    title: title,
-                    detail: "Then tuck the Mac into sleep"
-                ))
+                item.view = MenuRowView(text: MenuRowView.plainTitle(title))
             }
             menu.addItem(item)
         }

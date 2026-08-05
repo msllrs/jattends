@@ -91,12 +91,21 @@ final class KeepAwakeController {
         "kill -TERM " + pids.map(String.init).joined(separator: " ")
     }
 
-    /// The script runs as root, so a plain `pgrep -f <path>` from the app
-    /// still sees it (pgrep matches all users' processes by default).
+    /// `pgrep -f` on the bare path is a substring match — any process
+    /// merely mentioning the path in its argv (editors, watcher shells)
+    /// would count as running and later get TERMed. Anchor to the actual
+    /// interpreter invocation instead; no trailing anchor because the
+    /// script may be run with an idle-seconds argument.
+    static func processPattern(scriptPath: String) -> String {
+        "^/bin/zsh " + scriptPath.replacingOccurrences(of: ".", with: "\\.")
+    }
+
+    /// `-u root`: the script always runs as root, so a user-owned process
+    /// must never count (or be killed by the pid-based stop path).
     private static func runningPids() -> [Int32] {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-        process.arguments = ["-f", scriptPath]
+        process.arguments = ["-u", "root", "-f", processPattern(scriptPath: scriptPath)]
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
@@ -164,11 +173,14 @@ final class KeepAwakeController {
             detachedProcesses.append(process)
             DispatchQueue.main.async { completion(true) }
         } else {
-            guard passwordlessAllowed(["/usr/bin/pkill", "-TERM", "-f", script]) else { return false }
+            // The -l check and the run must share the exact argument
+            // vector for a sudoers rule to cover both.
+            let pkill = ["/usr/bin/pkill", "-TERM", "-f", processPattern(scriptPath: script)]
+            guard passwordlessAllowed(pkill) else { return false }
             DispatchQueue.global(qos: .userInitiated).async {
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-                process.arguments = ["-n", "/usr/bin/pkill", "-TERM", "-f", script]
+                process.arguments = ["-n"] + pkill
                 process.standardOutput = FileHandle.nullDevice
                 process.standardError = FileHandle.nullDevice
                 do { try process.run() } catch {

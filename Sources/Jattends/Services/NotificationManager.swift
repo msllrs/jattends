@@ -127,14 +127,14 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         let content = UNMutableNotificationContent()
         switch outcome {
         case .started:
-            content.title = "Keeping Mac awake"
-            content.body = "The Mac will stay awake until Claude sessions go quiet, then sleep."
+            content.title = "Clamshellmaxx on"
+            content.body = "The Mac stays awake until Claude's done, then sleeps."
             content.categoryIdentifier = Self.keepAwakeCategoryIdentifier
         case .stopped:
-            content.title = "Normal sleep restored"
-            content.body = "The keep-awake script was stopped."
+            content.title = "Clamshellmaxx off"
+            content.body = "Normal sleep restored."
         case .failed:
-            content.title = "Keep-awake not changed"
+            content.title = "Clamshellmaxx unchanged"
             content.body = "The administrator authorization was cancelled or failed."
         }
         let request = UNNotificationRequest(identifier: "keep-awake", content: content, trigger: nil)

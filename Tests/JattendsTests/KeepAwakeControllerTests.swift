@@ -117,6 +117,26 @@ final class KeepAwakeControllerTests: XCTestCase {
         XCTAssertTrue(command.hasSuffix("&"), "must background so osascript returns immediately")
     }
 
+    // A substring match on the script path also hits innocent processes
+    // that merely mention it (editors, agent shells, watchers) — the app
+    // then shows "running" falsely and stop would TERM bystanders. The
+    // pattern must anchor to the interpreter actually executing the script.
+    func testProcessPatternMatchesOnlyTheInterpreterInvocation() {
+        let pattern = KeepAwakeController.processPattern(
+            scriptPath: "/Users/matt/.claude/scripts/awake-until-claude-idle.sh")
+        XCTAssertEqual(pattern, "^/bin/zsh /Users/matt/\\.claude/scripts/awake-until-claude-idle\\.sh")
+
+        let regex = try! NSRegularExpression(pattern: pattern)
+        func matches(_ s: String) -> Bool {
+            regex.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil
+        }
+        XCTAssertTrue(matches("/bin/zsh /Users/matt/.claude/scripts/awake-until-claude-idle.sh"))
+        XCTAssertTrue(matches("/bin/zsh /Users/matt/.claude/scripts/awake-until-claude-idle.sh 600"))
+        XCTAssertFalse(matches("vim /Users/matt/.claude/scripts/awake-until-claude-idle.sh"))
+        XCTAssertFalse(matches("/bin/zsh -c pgrep -f /Users/matt/.claude/scripts/awake-until-claude-idle.sh"))
+        XCTAssertFalse(matches("/bin/zsh /Users/matt/Xclaude/scripts/awake-until-claude-idleYsh"))
+    }
+
     func testStopCommandUsesTermForCleanupTrap() {
         XCTAssertEqual(KeepAwakeController.stopCommand(pids: [123]), "kill -TERM 123")
         XCTAssertEqual(KeepAwakeController.stopCommand(pids: [123, 456]), "kill -TERM 123 456")
