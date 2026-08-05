@@ -127,8 +127,8 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         let content = UNMutableNotificationContent()
         switch outcome {
         case .started:
-            content.title = "Clamshellmaxx on"
-            content.body = "The Mac stays awake until Claude's done, then sleeps."
+            content.title = "Clamshellmaxxing"
+            content.body = "Caffeinated until Claude wraps up, then sleepy time."
             content.categoryIdentifier = Self.keepAwakeCategoryIdentifier
         case .stopped:
             content.title = "Clamshellmaxxing disabled"
