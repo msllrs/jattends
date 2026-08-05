@@ -2,58 +2,104 @@ import XCTest
 @testable import Jattends
 
 final class KeepAwakeControllerTests: XCTestCase {
-    private func makeController(
-        pids: @escaping () -> [Int32] = { [] }
-    ) -> (KeepAwakeController, commands: () -> [String], complete: (Bool) -> Void) {
+    private struct Harness {
+        let controller: KeepAwakeController
+        var passwordlessCalls: () -> [Bool]
+        var promptCommands: () -> [String]
+        var completePrompt: (Bool) -> Void
+    }
+
+    /// `passwordlessAvailable: false` models a machine without the sudoers
+    /// rule: runPasswordless declines and the admin prompt is the fallback.
+    private func makeHarness(
+        pids: @escaping () -> [Int32] = { [] },
+        passwordlessAvailable: Bool = false
+    ) -> Harness {
         let controller = KeepAwakeController()
-        var captured: [String] = []
-        var completions: [(Bool) -> Void] = []
+        var passwordless: [Bool] = []
+        var prompts: [String] = []
+        var promptCompletions: [(Bool) -> Void] = []
         controller.findPids = pids
-        controller.runPrivileged = { command, completion in
-            captured.append(command)
-            completions.append(completion)
+        controller.runPasswordless = { start, completion in
+            guard passwordlessAvailable else { return false }
+            passwordless.append(start)
+            completion(true)
+            return true
         }
-        return (controller, { captured }, { ok in completions.removeFirst()(ok) })
+        controller.runPrivileged = { command, completion in
+            prompts.append(command)
+            promptCompletions.append(completion)
+        }
+        return Harness(
+            controller: controller,
+            passwordlessCalls: { passwordless },
+            promptCommands: { prompts },
+            completePrompt: { ok in promptCompletions.removeFirst()(ok) }
+        )
     }
 
-    // Reproduces the double-start: clicking the menu row again while the
-    // first admin-password dialog is still open must not launch a second
-    // instance of the script.
+    // Clicking the menu row again while the first admin-password dialog is
+    // still open must not launch a second instance of the script.
     func testToggleWhileAuthorizationPendingIsIgnored() {
-        let (controller, commands, _) = makeController()
-        controller.toggle()
-        controller.toggle()
-        XCTAssertEqual(commands().count, 1, "second toggle during pending auth must be a no-op")
+        let h = makeHarness()
+        h.controller.toggle()
+        h.controller.toggle()
+        XCTAssertEqual(h.promptCommands().count, 1, "second toggle during pending auth must be a no-op")
     }
 
-    func testToggleTogglesAgainAfterCompletion() {
+    func testPasswordlessPreferredOverAdminPrompt() {
         var running: [Int32] = []
-        let (controller, commands, complete) = makeController(pids: { running })
-        controller.toggle()
-        running = [42]
-        complete(true)
-        controller.toggle()
-        XCTAssertEqual(commands().count, 2)
-        XCTAssertTrue(commands()[0].contains("nohup"), "first toggle starts")
-        XCTAssertEqual(commands()[1], "kill -TERM 42", "second toggle stops the running instance")
-    }
-
-    func testOutcomesAreReported() {
-        var running: [Int32] = []
-        let (controller, _, complete) = makeController(pids: { running })
+        let h = makeHarness(pids: { running }, passwordlessAvailable: true)
         var outcomes: [KeepAwakeController.Outcome] = []
-        controller.onOutcome = { outcomes.append($0) }
+        h.controller.onOutcome = { outcomes.append($0) }
 
-        controller.toggle()            // start…
-        complete(true)                 // …authorized
+        h.controller.toggle()
         running = [42]
-        controller.toggle()            // stop…
-        complete(false)                // …user cancelled the password dialog
-        running = []
-        controller.toggle()
-        complete(true)
+        h.controller.toggle()
 
-        XCTAssertEqual(outcomes, [.started, .failed, .started])
+        XCTAssertEqual(h.passwordlessCalls(), [true, false], "start then stop, both passwordless")
+        XCTAssertTrue(h.promptCommands().isEmpty, "admin prompt must not appear when sudo -n works")
+        XCTAssertEqual(outcomes, [.started, .stopped])
+    }
+
+    func testFallsBackToAdminPromptWithoutSudoersRule() {
+        var running: [Int32] = []
+        let h = makeHarness(pids: { running }, passwordlessAvailable: false)
+        h.controller.toggle()
+        running = [42]
+        h.completePrompt(true)
+        h.controller.toggle()
+
+        XCTAssertEqual(h.promptCommands().count, 2)
+        XCTAssertTrue(h.promptCommands()[0].contains("nohup"), "first toggle starts")
+        XCTAssertEqual(h.promptCommands()[1], "kill -TERM 42", "second toggle stops the running instance")
+    }
+
+    func testCancelledPromptReportsFailed() {
+        let h = makeHarness()
+        var outcomes: [KeepAwakeController.Outcome] = []
+        h.controller.onOutcome = { outcomes.append($0) }
+        h.controller.toggle()
+        h.completePrompt(false)
+        XCTAssertEqual(outcomes, [.failed])
+    }
+
+    // The notification's Stop action fires blind (the script may have died
+    // in the meantime) — stop() must only act when something is running.
+    func testStopIsNoOpWhenNotRunning() {
+        let h = makeHarness(pids: { [] }, passwordlessAvailable: true)
+        h.controller.stop()
+        XCTAssertTrue(h.passwordlessCalls().isEmpty)
+        XCTAssertTrue(h.promptCommands().isEmpty)
+    }
+
+    func testStopStopsWhenRunning() {
+        let h = makeHarness(pids: { [42] }, passwordlessAvailable: true)
+        var outcomes: [KeepAwakeController.Outcome] = []
+        h.controller.onOutcome = { outcomes.append($0) }
+        h.controller.stop()
+        XCTAssertEqual(h.passwordlessCalls(), [false])
+        XCTAssertEqual(outcomes, [.stopped])
     }
 
     func testStartCommandInjectsSudoUser() {

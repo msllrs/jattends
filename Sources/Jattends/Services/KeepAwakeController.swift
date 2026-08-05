@@ -3,8 +3,9 @@ import Foundation
 /// Drives `~/.claude/scripts/awake-until-claude-idle.sh` from the menu:
 /// the script keeps the Mac awake (even lid-closed) until every Claude
 /// session has been quiet for a while, then restores normal sleep and
-/// sleeps the Mac. It needs root for pmset, so start/stop run through
-/// the macOS administrator-password prompt via osascript.
+/// sleeps the Mac. It needs root for pmset; with a sudoers rule in place
+/// start/stop run silently via `sudo -n`, otherwise they fall back to the
+/// macOS administrator-password prompt via osascript.
 final class KeepAwakeController {
     static let shared = KeepAwakeController()
 
@@ -12,16 +13,21 @@ final class KeepAwakeController {
         case started, stopped, failed
     }
 
-    /// Reports what actually happened after the password dialog resolves.
+    /// Reports what actually happened after the privileged run resolves.
     var onOutcome: ((Outcome) -> Void)?
 
-    /// True while the admin-password dialog is up (or osascript is still
-    /// running) — `toggle()` is a no-op then, so a second menu click can't
-    /// launch a second instance of the script.
+    /// True while a privileged run (or its password dialog) is pending —
+    /// `toggle()` is a no-op then, so a second menu click can't launch a
+    /// second instance of the script.
     private(set) var actionInFlight = false
 
-    // Seams for tests; default to the real pgrep/osascript implementations.
+    // Seams for tests; default to the real sudo/pgrep/osascript implementations.
     var findPids: () -> [Int32] = KeepAwakeController.runningPids
+    /// Returns false WITHOUT calling the completion when no sudoers rule
+    /// allows the action passwordless; the caller then falls back to the
+    /// admin-prompt path.
+    var runPasswordless: (_ start: Bool, _ completion: @escaping (Bool) -> Void) -> Bool =
+        KeepAwakeController.runPasswordless
     var runPrivileged: (_ command: String, _ completion: @escaping (Bool) -> Void) -> Void =
         KeepAwakeController.runPrivileged
 
@@ -39,23 +45,35 @@ final class KeepAwakeController {
 
     func toggle() {
         guard !actionInFlight else { return }
-        let pids = findPids()
-        let starting = pids.isEmpty
-        let command = starting
-            ? Self.startCommand(scriptPath: Self.scriptPath, user: NSUserName())
-            : Self.stopCommand(pids: pids)
+        perform(start: findPids().isEmpty)
+    }
+
+    /// The notification's Stop action fires blind — the script may have
+    /// died in the meantime, so only act when something is running.
+    func stop() {
+        guard !actionInFlight, !findPids().isEmpty else { return }
+        perform(start: false)
+    }
+
+    private func perform(start: Bool) {
         actionInFlight = true
-        runPrivileged(command) { [weak self] ok in
+        let completion: (Bool) -> Void = { [weak self] ok in
             guard let self else { return }
             self.actionInFlight = false
-            self.onOutcome?(ok ? (starting ? .started : .stopped) : .failed)
+            self.onOutcome?(ok ? (start ? .started : .stopped) : .failed)
         }
+        if runPasswordless(start, completion) { return }
+        let command = start
+            ? Self.startCommand(scriptPath: Self.scriptPath, user: NSUserName())
+            : Self.stopCommand(pids: findPids())
+        runPrivileged(command, completion)
     }
 
     /// osascript's `do shell script … with administrator privileges` runs
     /// as root with no SUDO_USER, and the script resolves its projects dir
     /// from SUDO_USER — unset it would watch root's empty ~/.claude and
-    /// sleep the Mac immediately. Inject the real user explicitly.
+    /// sleep the Mac immediately. Inject the real user explicitly. (The
+    /// passwordless path doesn't need this: sudo itself sets SUDO_USER.)
     static func startCommand(scriptPath: String, user: String) -> String {
         "SUDO_USER='\(user)' nohup '\(scriptPath)' >/dev/null 2>&1 &"
     }
@@ -80,6 +98,69 @@ final class KeepAwakeController {
         return String(decoding: data, as: UTF8.self)
             .split(whereSeparator: \.isNewline)
             .compactMap { Int32($0) }
+    }
+
+    /// Keeps detached sudo Processes alive until they exit — deallocating
+    /// a running Process kills the child, and the start script runs for hours.
+    private static var detachedProcesses: [Process] = []
+
+    /// `sudo -n -l <cmd…>` exits 0 iff a sudoers rule allows running the
+    /// command without a password.
+    private static func passwordlessAllowed(_ command: [String]) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
+        process.arguments = ["-n", "-l"] + command
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { return false }
+        process.waitUntilExit()
+        return process.terminationStatus == 0
+    }
+
+    /// Completions are delivered on the main queue so app wiring can touch
+    /// UI state.
+    private static func runPasswordless(start: Bool, completion: @escaping (Bool) -> Void) -> Bool {
+        let script = scriptPath
+        if start {
+            guard passwordlessAllowed([script]) else { return false }
+            // Detached: the script runs until Claude sessions idle, so
+            // don't wait for exit — launch and report that it started.
+            // sudo sets SUDO_USER itself on this path.
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
+            process.arguments = ["-n", script]
+            process.standardInput = FileHandle.nullDevice
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            process.terminationHandler = { finished in
+                DispatchQueue.main.async {
+                    detachedProcesses.removeAll { $0 === finished }
+                }
+            }
+            do { try process.run() } catch {
+                DispatchQueue.main.async { completion(false) }
+                return true
+            }
+            detachedProcesses.append(process)
+            DispatchQueue.main.async { completion(true) }
+        } else {
+            guard passwordlessAllowed(["/usr/bin/pkill", "-TERM", "-f", script]) else { return false }
+            DispatchQueue.global(qos: .userInitiated).async {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
+                process.arguments = ["-n", "/usr/bin/pkill", "-TERM", "-f", script]
+                process.standardOutput = FileHandle.nullDevice
+                process.standardError = FileHandle.nullDevice
+                do { try process.run() } catch {
+                    DispatchQueue.main.async { completion(false) }
+                    return
+                }
+                process.waitUntilExit()
+                let ok = process.terminationStatus == 0
+                DispatchQueue.main.async { completion(ok) }
+            }
+        }
+        return true
     }
 
     /// Completion (exit 0 → true) is delivered on the main queue so app

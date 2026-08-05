@@ -10,10 +10,13 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     private static let approvalCategoryIdentifier = "APPROVAL_REQUEST"
     private static let approveActionIdentifier = "APPROVE_ACTION"
     private static let denyActionIdentifier = "DENY_ACTION"
+    private static let keepAwakeCategoryIdentifier = "KEEP_AWAKE"
+    private static let keepAwakeStopActionIdentifier = "KEEP_AWAKE_STOP_ACTION"
 
     private var onFocusSession: ((SessionInfo) -> Void)?
     private var onApprovalDecision: ((String, Bool) -> Void)?
     private var onApprovalFocus: ((String) -> Void)?
+    private var onKeepAwakeStop: (() -> Void)?
     private var repeatTimer: Timer?
     private var repeatStartTime: Date?
     private var currentSound: NSSound?
@@ -49,7 +52,17 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
             actions: [approveAction, denyAction],
             intentIdentifiers: []
         )
-        center.setNotificationCategories([category, approvalCategory])
+        let keepAwakeStopAction = UNNotificationAction(
+            identifier: Self.keepAwakeStopActionIdentifier,
+            title: "Stop & Allow Sleep",
+            options: []
+        )
+        let keepAwakeCategory = UNNotificationCategory(
+            identifier: Self.keepAwakeCategoryIdentifier,
+            actions: [keepAwakeStopAction],
+            intentIdentifiers: []
+        )
+        center.setNotificationCategories([category, approvalCategory, keepAwakeCategory])
     }
 
     /// Set the callback for when a user taps the "Focus" action on a notification.
@@ -66,6 +79,12 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     /// (sessionId) — jump to the terminal to look before answering.
     func setApprovalFocusHandler(_ handler: @escaping (String) -> Void) {
         onApprovalFocus = handler
+    }
+
+    /// Set the callback for the "Stop & Allow Sleep" action on the
+    /// keep-awake started notification.
+    func setKeepAwakeStopHandler(_ handler: @escaping () -> Void) {
+        onKeepAwakeStop = handler
     }
 
     /// Notify for a pending permission request with Approve/Deny actions.
@@ -110,6 +129,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         case .started:
             content.title = "Keeping Mac awake"
             content.body = "The Mac will stay awake until Claude sessions go quiet, then sleep."
+            content.categoryIdentifier = Self.keepAwakeCategoryIdentifier
         case .stopped:
             content.title = "Normal sleep restored"
             content.body = "The keep-awake script was stopped."
@@ -224,6 +244,16 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
+        if response.notification.request.content.categoryIdentifier == Self.keepAwakeCategoryIdentifier {
+            if response.actionIdentifier == Self.keepAwakeStopActionIdentifier {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onKeepAwakeStop?()
+                }
+            }
+            completionHandler()
+            return
+        }
+
         if response.notification.request.content.categoryIdentifier == Self.approvalCategoryIdentifier {
             let userInfo = response.notification.request.content.userInfo
             if let requestId = userInfo["requestId"] as? String {

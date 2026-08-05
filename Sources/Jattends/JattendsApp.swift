@@ -48,6 +48,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         KeepAwakeController.shared.onOutcome = { [weak self] outcome in
             self?.notificationManager.notifyKeepAwake(outcome)
         }
+        notificationManager.setKeepAwakeStopHandler {
+            KeepAwakeController.shared.stop()
+        }
 
         // Set up global hotkey action
         hotkeyManager.onHotkey = { [weak self] in
@@ -444,7 +447,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item.view = MenuRowView(text: Self.makeMenuItemTitle(
                     symbol: "●",
                     color: .systemGreen,
-                    title: title,
+                    title: "Stop Keeping Awake",
                     detail: "On — sleeps the Mac once sessions go quiet"
                 ))
             } else {
