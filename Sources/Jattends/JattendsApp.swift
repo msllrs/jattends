@@ -419,6 +419,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
+        if KeepAwakeController.scriptExists {
+            let title = "Keep Awake Until Idle"
+            let item = NSMenuItem(title: title, action: #selector(toggleKeepAwake), keyEquivalent: "")
+            item.target = self
+            if KeepAwakeController.isRunning {
+                item.view = MenuRowView(text: Self.makeMenuItemTitle(
+                    symbol: "●",
+                    color: .systemGreen,
+                    title: title,
+                    detail: "On — sleeps the Mac once sessions go quiet"
+                ))
+            } else {
+                item.view = MenuRowView(text: MenuRowView.plainTitle(title))
+            }
+            menu.addItem(item)
+        }
+
         let settings = NSMenuItem(title: "Settings\u{2026}", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
         settings.view = MenuRowView(text: MenuRowView.plainTitle("Settings\u{2026}"), trailing: "⌘,")
@@ -427,6 +444,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let quit = NSMenuItem(title: "Quit Jattends", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         quit.view = MenuRowView(text: MenuRowView.plainTitle("Quit Jattends"), trailing: "⌘Q")
         menu.addItem(quit)
+    }
+
+    @objc private func toggleKeepAwake() {
+        KeepAwakeController.toggle()
     }
 
     @objc private func openSettings() {
