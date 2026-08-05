@@ -57,16 +57,32 @@ final class KeepAwakeController {
 
     private func perform(start: Bool) {
         actionInFlight = true
-        let completion: (Bool) -> Void = { [weak self] ok in
+        let finish: (Outcome) -> Void = { [weak self] outcome in
             guard let self else { return }
             self.actionInFlight = false
-            self.onOutcome?(ok ? (start ? .started : .stopped) : .failed)
+            self.onOutcome?(outcome)
         }
-        if runPasswordless(start, completion) { return }
+        // Passwordless spawns the Process directly and fails loudly on
+        // spawn errors, so its result is trusted as-is (it also completes
+        // before pgrep would see the fresh process).
+        if runPasswordless(start, { ok in
+            finish(ok ? (start ? .started : .stopped) : .failed)
+        }) { return }
         let command = start
             ? Self.startCommand(scriptPath: Self.scriptPath, user: NSUserName(), logPath: Self.logPath)
             : Self.stopCommand(pids: findPids())
-        runPrivileged(command, completion)
+        runPrivileged(command) { [weak self] ok in
+            guard let self else { return }
+            // Prompt-path starts need verification: the trampoline shell
+            // exits 0 even when the backgrounded launch died immediately
+            // (nohup's console error hid every failure this way), so only
+            // report .started if the script process actually exists now.
+            if start {
+                finish(ok && !self.findPids().isEmpty ? .started : .failed)
+            } else {
+                finish(ok ? .stopped : .failed)
+            }
+        }
     }
 
     /// The script's stdout narrates its lifecycle (sleep disabled, idle
@@ -82,8 +98,14 @@ final class KeepAwakeController {
     /// from SUDO_USER — unset it would watch root's empty ~/.claude and
     /// sleep the Mac immediately. Inject the real user explicitly. (The
     /// passwordless path doesn't need this: sudo itself sets SUDO_USER.)
+    ///
+    /// No nohup: under security_authtrampoline it dies with "can't detach
+    /// from console: Inappropriate ioctl for device" BEFORE launching the
+    /// script, and the backgrounding `&` still made the shell exit 0 — the
+    /// launch was silently swallowed. Detach the TN2065 way instead:
+    /// backgrounded with all three stdio streams redirected.
     static func startCommand(scriptPath: String, user: String, logPath: String) -> String {
-        "date '+--- start %F %T' >>'\(logPath)'; SUDO_USER='\(user)' nohup '\(scriptPath)' >>'\(logPath)' 2>&1 &"
+        "date '+--- start %F %T' >>'\(logPath)'; SUDO_USER='\(user)' '\(scriptPath)' >>'\(logPath)' 2>&1 </dev/null &"
     }
 
     /// TERM (not KILL) so the script's trap restores normal sleep.

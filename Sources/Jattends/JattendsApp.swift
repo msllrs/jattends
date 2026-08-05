@@ -438,7 +438,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item.action = nil
                 item.view = MenuRowView(text: MenuRowView.plainTitle(title), trailing: "\u{2026}")
             } else if KeepAwakeController.shared.isRunning {
-                item.view = MenuRowView(text: MenuRowView.plainTitle(title), trailing: "On")
+                // The name change IS the state: armed reads as the outcome.
+                item.view = MenuRowView(text: MenuRowView.plainTitle("Sleepmaxx"))
             } else {
                 item.view = MenuRowView(text: MenuRowView.plainTitle(title))
             }

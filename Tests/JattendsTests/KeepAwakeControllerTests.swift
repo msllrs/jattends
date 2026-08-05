@@ -71,8 +71,32 @@ final class KeepAwakeControllerTests: XCTestCase {
         h.controller.toggle()
 
         XCTAssertEqual(h.promptCommands().count, 2)
-        XCTAssertTrue(h.promptCommands()[0].contains("nohup"), "first toggle starts")
+        XCTAssertTrue(h.promptCommands()[0].contains("awake-until-claude-idle.sh'"), "first toggle starts")
         XCTAssertEqual(h.promptCommands()[1], "kill -TERM 42", "second toggle stops the running instance")
+    }
+
+    // The outage mode that hid every failure so far: authorization succeeds
+    // and the shell exits 0, but the backgrounded launch died (nohup's
+    // console error did exactly this). "Started" must only be reported when
+    // the script process actually exists afterwards.
+    func testStartThatSilentlyDiesReportsFailed() {
+        let h = makeHarness(pids: { [] })
+        var outcomes: [KeepAwakeController.Outcome] = []
+        h.controller.onOutcome = { outcomes.append($0) }
+        h.controller.toggle()
+        h.completePrompt(true)
+        XCTAssertEqual(outcomes, [.failed])
+    }
+
+    func testStartThatSurvivesReportsStarted() {
+        var running: [Int32] = []
+        let h = makeHarness(pids: { running })
+        var outcomes: [KeepAwakeController.Outcome] = []
+        h.controller.onOutcome = { outcomes.append($0) }
+        h.controller.toggle()
+        running = [42]
+        h.completePrompt(true)
+        XCTAssertEqual(outcomes, [.started])
     }
 
     func testCancelledPromptReportsFailed() {
@@ -111,9 +135,14 @@ final class KeepAwakeControllerTests: XCTestCase {
         // Without SUDO_USER the root-run script resolves ~root and sleeps
         // the Mac immediately — the env injection is load-bearing.
         XCTAssertTrue(command.contains("SUDO_USER='matt' "))
-        XCTAssertTrue(command.contains("nohup '/Users/matt/.claude/scripts/awake-until-claude-idle.sh'"))
+        // nohup dies with "can't detach from console" under osascript's
+        // admin trampoline, silently swallowing the launch. Detaching is
+        // done the TN2065 way instead: & with all three stdio redirected.
+        XCTAssertFalse(command.contains("nohup"))
+        XCTAssertTrue(command.contains("'/Users/matt/.claude/scripts/awake-until-claude-idle.sh'"))
         XCTAssertTrue(command.contains(">>'/Users/matt/.claude/jattends/keepawake.log' 2>&1"),
                       "lifecycle output must be kept for post-mortem diagnosis")
+        XCTAssertTrue(command.contains("</dev/null"), "stdin must be detached too")
         XCTAssertTrue(command.hasSuffix("&"), "must background so osascript returns immediately")
     }
 
