@@ -30,6 +30,8 @@ final class KeepAwakeController {
         KeepAwakeController.runPasswordless
     var runPrivileged: (_ command: String, _ completion: @escaping (Bool) -> Void) -> Void =
         KeepAwakeController.runPrivileged
+    var awaitExit: (_ isGone: @escaping () -> Bool, _ done: @escaping () -> Void) -> Void =
+        KeepAwakeController.awaitExit
 
     static var scriptPath: String {
         FileManager.default.homeDirectoryForCurrentUser
@@ -59,8 +61,21 @@ final class KeepAwakeController {
         actionInFlight = true
         let finish: (Outcome) -> Void = { [weak self] outcome in
             guard let self else { return }
-            self.actionInFlight = false
-            self.onOutcome?(outcome)
+            // A TERM'd script spends a couple of seconds in its cleanup
+            // trap (restore_sleep + pmset) and pgrep still sees it — keep
+            // the row busy until the process is actually gone, or the menu
+            // shows a live row for a dying process. Outcome still reports
+            // promptly; only the busy flag waits.
+            if outcome == .stopped {
+                self.onOutcome?(outcome)
+                self.awaitExit(
+                    { [weak self] in self?.findPids().isEmpty ?? true },
+                    { [weak self] in self?.actionInFlight = false }
+                )
+            } else {
+                self.actionInFlight = false
+                self.onOutcome?(outcome)
+            }
         }
         // Passwordless spawns the Process directly and fails loudly on
         // spawn errors, so its result is trusted as-is (it also completes
@@ -152,6 +167,22 @@ final class KeepAwakeController {
         }
         handle.seekToEndOfFile()
         return handle
+    }
+
+    /// Polls until the stopped script is really gone: every 250ms on the
+    /// main queue, capped at 20 attempts (~5s) so a kill that somehow
+    /// failed can't wedge the menu row in the busy state forever.
+    private static func awaitExit(isGone: @escaping () -> Bool, done: @escaping () -> Void) {
+        func poll(_ attemptsLeft: Int) {
+            if isGone() || attemptsLeft <= 0 {
+                done()
+                return
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                poll(attemptsLeft - 1)
+            }
+        }
+        poll(20)
     }
 
     /// `sudo -n -l <cmd…>` exits 0 iff a sudoers rule allows running the

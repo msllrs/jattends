@@ -30,6 +30,9 @@ final class KeepAwakeControllerTests: XCTestCase {
             prompts.append(command)
             promptCompletions.append(completion)
         }
+        // Deterministic default: the stopped process disappears instantly.
+        // Tests exercising the wind-down window override this.
+        controller.awaitExit = { _, done in done() }
         return Harness(
             controller: controller,
             passwordlessCalls: { passwordless },
@@ -115,6 +118,35 @@ final class KeepAwakeControllerTests: XCTestCase {
         h.controller.stop()
         XCTAssertTrue(h.passwordlessCalls().isEmpty)
         XCTAssertTrue(h.promptCommands().isEmpty)
+    }
+
+    // A TERM'd script spends a couple of seconds in its cleanup trap, and
+    // pgrep still sees it — the menu must keep showing the busy state (not
+    // a live "Sleepmaxx" row for a dead man walking) until it's truly gone.
+    func testRowStaysBusyUntilStoppedProcessActuallyExits() {
+        var running: [Int32] = [42]
+        let h = makeHarness(pids: { running }, passwordlessAvailable: true)
+        var exitDone: (() -> Void)?
+        h.controller.awaitExit = { _, done in exitDone = done }
+        var outcomes: [KeepAwakeController.Outcome] = []
+        h.controller.onOutcome = { outcomes.append($0) }
+
+        h.controller.toggle()
+        XCTAssertEqual(outcomes, [.stopped], "outcome still reports promptly")
+        XCTAssertTrue(h.controller.actionInFlight, "row stays busy through the TERM-trap wind-down")
+
+        running = []
+        exitDone?()
+        XCTAssertFalse(h.controller.actionInFlight)
+    }
+
+    // A failed stop (cancelled password) must not linger in the busy state.
+    func testFailedStopClearsBusyImmediately() {
+        let h = makeHarness(pids: { [42] })
+        h.controller.awaitExit = { _, _ in XCTFail("no wind-down wait after a failed stop") }
+        h.controller.toggle()
+        h.completePrompt(false)
+        XCTAssertFalse(h.controller.actionInFlight)
     }
 
     func testStopStopsWhenRunning() {
