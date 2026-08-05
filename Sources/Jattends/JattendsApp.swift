@@ -43,6 +43,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             TerminalActivator.activate(session: session)
         }
 
+        // Keep-awake feedback: the admin-password dialog gives no result of
+        // its own, so surface started/stopped/failed as a notification.
+        KeepAwakeController.shared.onOutcome = { [weak self] outcome in
+            self?.notificationManager.notifyKeepAwake(outcome)
+        }
+
         // Set up global hotkey action
         hotkeyManager.onHotkey = { [weak self] in
             self?.handleHotkey()
@@ -423,7 +429,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let title = "Keep Awake Until Idle"
             let item = NSMenuItem(title: title, action: #selector(toggleKeepAwake), keyEquivalent: "")
             item.target = self
-            if KeepAwakeController.isRunning {
+            if KeepAwakeController.shared.actionInFlight {
+                // Password dialog still up — a reopened menu should explain
+                // why the row can't be clicked again yet.
+                item.isEnabled = false
+                item.action = nil
+                item.view = MenuRowView(text: Self.makeMenuItemTitle(
+                    symbol: "◐",
+                    color: .secondaryLabelColor,
+                    title: title,
+                    detail: "Waiting for authorization\u{2026}"
+                ))
+            } else if KeepAwakeController.shared.isRunning {
                 item.view = MenuRowView(text: Self.makeMenuItemTitle(
                     symbol: "●",
                     color: .systemGreen,
@@ -447,7 +464,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func toggleKeepAwake() {
-        KeepAwakeController.toggle()
+        KeepAwakeController.shared.toggle()
     }
 
     @objc private func openSettings() {

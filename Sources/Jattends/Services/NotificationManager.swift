@@ -101,6 +101,26 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         UNUserNotificationCenter.current().add(request)
     }
 
+    /// Feedback for the keep-awake toggle after the admin-password dialog.
+    /// Bypasses the notification toggles — it's direct feedback to a user
+    /// action, not an ambient alert.
+    func notifyKeepAwake(_ outcome: KeepAwakeController.Outcome) {
+        let content = UNMutableNotificationContent()
+        switch outcome {
+        case .started:
+            content.title = "Keeping Mac awake"
+            content.body = "The Mac will stay awake until Claude sessions go quiet, then sleep."
+        case .stopped:
+            content.title = "Normal sleep restored"
+            content.body = "The keep-awake script was stopped."
+        case .failed:
+            content.title = "Keep-awake not changed"
+            content.body = "The administrator authorization was cancelled or failed."
+        }
+        let request = UNNotificationRequest(identifier: "keep-awake", content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+    }
+
     /// Remove the notification for a request that was answered or expired.
     func withdrawApproval(requestId: String) {
         let center = UNUserNotificationCenter.current()
