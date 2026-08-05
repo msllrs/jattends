@@ -429,7 +429,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(NSMenuItem.separator())
 
         if KeepAwakeController.scriptExists {
-            let title = "Keep Awake Until Idle"
+            let title = "Stay Awake Until Claude's Done"
             let item = NSMenuItem(title: title, action: #selector(toggleKeepAwake), keyEquivalent: "")
             item.target = self
             if KeepAwakeController.shared.actionInFlight {
@@ -441,17 +441,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     symbol: "◐",
                     color: .secondaryLabelColor,
                     title: title,
-                    detail: "Waiting for authorization\u{2026}"
+                    detail: "Waiting for your password\u{2026}"
                 ))
             } else if KeepAwakeController.shared.isRunning {
                 item.view = MenuRowView(text: Self.makeMenuItemTitle(
                     symbol: "●",
                     color: .systemGreen,
-                    title: "Stop Keeping Awake",
-                    detail: "On — sleeps the Mac once sessions go quiet"
+                    title: "Staying Awake for Claude",
+                    detail: "Sleeps after 5 quiet minutes — click to stop"
                 ))
             } else {
-                item.view = MenuRowView(text: MenuRowView.plainTitle(title))
+                item.view = MenuRowView(text: Self.makeMenuItemTitle(
+                    symbol: "○",
+                    color: .tertiaryLabelColor,
+                    title: title,
+                    detail: "Then tuck the Mac into sleep"
+                ))
             }
             menu.addItem(item)
         }

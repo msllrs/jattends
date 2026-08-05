@@ -64,9 +64,17 @@ final class KeepAwakeController {
         }
         if runPasswordless(start, completion) { return }
         let command = start
-            ? Self.startCommand(scriptPath: Self.scriptPath, user: NSUserName())
+            ? Self.startCommand(scriptPath: Self.scriptPath, user: NSUserName(), logPath: Self.logPath)
             : Self.stopCommand(pids: findPids())
         runPrivileged(command, completion)
+    }
+
+    /// The script's stdout narrates its lifecycle (sleep disabled, idle
+    /// reached, TERM cleanup) — kept in a log so a dead instance can be
+    /// diagnosed after the fact.
+    static var logPath: String {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/jattends/keepawake.log").path
     }
 
     /// osascript's `do shell script … with administrator privileges` runs
@@ -74,8 +82,8 @@ final class KeepAwakeController {
     /// from SUDO_USER — unset it would watch root's empty ~/.claude and
     /// sleep the Mac immediately. Inject the real user explicitly. (The
     /// passwordless path doesn't need this: sudo itself sets SUDO_USER.)
-    static func startCommand(scriptPath: String, user: String) -> String {
-        "SUDO_USER='\(user)' nohup '\(scriptPath)' >/dev/null 2>&1 &"
+    static func startCommand(scriptPath: String, user: String, logPath: String) -> String {
+        "date '+--- start %F %T' >>'\(logPath)'; SUDO_USER='\(user)' nohup '\(scriptPath)' >>'\(logPath)' 2>&1 &"
     }
 
     /// TERM (not KILL) so the script's trap restores normal sleep.
@@ -104,6 +112,17 @@ final class KeepAwakeController {
     /// a running Process kills the child, and the start script runs for hours.
     private static var detachedProcesses: [Process] = []
 
+    private static func logHandle() -> FileHandle {
+        if !FileManager.default.fileExists(atPath: logPath) {
+            FileManager.default.createFile(atPath: logPath, contents: nil)
+        }
+        guard let handle = FileHandle(forWritingAtPath: logPath) else {
+            return FileHandle.nullDevice
+        }
+        handle.seekToEndOfFile()
+        return handle
+    }
+
     /// `sudo -n -l <cmd…>` exits 0 iff a sudoers rule allows running the
     /// command without a password.
     private static func passwordlessAllowed(_ command: [String]) -> Bool {
@@ -130,8 +149,9 @@ final class KeepAwakeController {
             process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
             process.arguments = ["-n", script]
             process.standardInput = FileHandle.nullDevice
-            process.standardOutput = FileHandle.nullDevice
-            process.standardError = FileHandle.nullDevice
+            let log = logHandle()
+            process.standardOutput = log
+            process.standardError = log
             process.terminationHandler = { finished in
                 DispatchQueue.main.async {
                     detachedProcesses.removeAll { $0 === finished }

@@ -102,15 +102,18 @@ final class KeepAwakeControllerTests: XCTestCase {
         XCTAssertEqual(outcomes, [.stopped])
     }
 
-    func testStartCommandInjectsSudoUser() {
+    func testStartCommandInjectsSudoUserAndLogs() {
         let command = KeepAwakeController.startCommand(
             scriptPath: "/Users/matt/.claude/scripts/awake-until-claude-idle.sh",
-            user: "matt"
+            user: "matt",
+            logPath: "/Users/matt/.claude/jattends/keepawake.log"
         )
         // Without SUDO_USER the root-run script resolves ~root and sleeps
         // the Mac immediately — the env injection is load-bearing.
-        XCTAssertTrue(command.hasPrefix("SUDO_USER='matt' "))
+        XCTAssertTrue(command.contains("SUDO_USER='matt' "))
         XCTAssertTrue(command.contains("nohup '/Users/matt/.claude/scripts/awake-until-claude-idle.sh'"))
+        XCTAssertTrue(command.contains(">>'/Users/matt/.claude/jattends/keepawake.log' 2>&1"),
+                      "lifecycle output must be kept for post-mortem diagnosis")
         XCTAssertTrue(command.hasSuffix("&"), "must background so osascript returns immediately")
     }
 
