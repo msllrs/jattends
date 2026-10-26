@@ -104,6 +104,17 @@ def find_process_info(start_pid, procs):
     return claude_pid, tty, terminal_pid, terminal_app
 
 
+def stamp_rex(session):
+    """Record the Rex block/session hosting this claude. Rex is a multiplexer:
+    claude's parent is the rex server daemon, not a GUI app, so the exported
+    IDs are the only way to focus the exact pane later."""
+    for env, key in (("REX_BLOCK", "rexBlock"), ("REX_SESSION", "rexSession"),
+                     ("REX_BIN_DIR", "rexBinDir")):
+        value = os.environ.get(env)
+        if value:
+            session[key] = value
+
+
 def tty_for_pid(pid):
     """The pty a process is attached to, via its open stdio fds — agent
     sessions run on daemon-created ptys that ps won't report as a
@@ -355,6 +366,7 @@ def register_statusline_session(d, rec=None):
         session["terminalTty"] = tty
         session["terminalPid"] = term_pid
         session["terminalApp"] = term_app or "unknown"
+        stamp_rex(session)
     # Daemon ptys don't show as a controlling tty in ps — recover them from
     # the claude process's open fds so title-marker activation still works.
     if session.get("claudePid") and not session.get("terminalTty"):
@@ -825,6 +837,8 @@ def handle_event():
         # from the claude process's open fds (title-marker activation).
         if session["claudePid"] and not session["terminalTty"]:
             session["terminalTty"] = tty_for_pid(session["claudePid"])
+
+    stamp_rex(session)
 
     # Any real hook event is activity — undo a "hide until next activity"
     clear_tombstones(session_id, session.get("claudePid"))
