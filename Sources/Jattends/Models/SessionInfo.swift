@@ -26,7 +26,7 @@ struct SessionInfo: Codable, Identifiable {
     let rexBinDir: String?
     let claudePid: Int?
     let updatedAt: Date
-    let statusDetail: String?
+    var statusDetail: String?
     let lastPrompt: String?
     let permissionMode: String?
     let transcriptPath: String?

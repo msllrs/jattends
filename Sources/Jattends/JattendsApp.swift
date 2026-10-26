@@ -14,6 +14,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let store = SessionStore()
     private let approvalStore = ApprovalStore()
+    private let rexStatusMonitor = RexStatusMonitor()
+    private var rexStatusSource = RexStatusSource.current()
     private var dotUrgency: BadgeDotModel.Urgency?
     private var dotLayer: CALayer?
     private var dotGeneration = 0
@@ -59,8 +61,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hotkeyManager.update()
 
         store.onReload = { [weak self] in
-            self?.updateIconIfNeeded()
+            guard let self else { return }
+            self.rexStatusMonitor.snapshot(self.store.sessions)
+            self.updateIconIfNeeded()
         }
+        setUpRexStatus()
         store.refreshLiveCwds()
         store.startWatching()
 
@@ -127,6 +132,38 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.store.forceReload()
             self?.checkHookHealth()
         }
+    }
+
+    /// Rex sessions take status from Rex's program status by default; the
+    /// monitor runs only while that source is selected.
+    private func setUpRexStatus() {
+        store.rexStatusRecords = { [weak self] in self?.rexStatusMonitor.records ?? [:] }
+        rexStatusMonitor.onChange = { [weak self] in
+            self?.store.forceReload()
+        }
+        if rexStatusSource == .programStatus {
+            rexStatusMonitor.start()
+        }
+        // Settings writes the source straight to UserDefaults
+        NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.rexStatusSourceMayHaveChanged()
+        }
+    }
+
+    private func rexStatusSourceMayHaveChanged() {
+        let source = RexStatusSource.current()
+        guard source != rexStatusSource else { return }
+        rexStatusSource = source
+        if source == .programStatus {
+            rexStatusMonitor.start()
+        } else {
+            rexStatusMonitor.stop()
+        }
+        store.forceReload()
     }
 
     /// Insurance against other tools rewriting ~/.claude/settings.json and
