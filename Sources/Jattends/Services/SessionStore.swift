@@ -18,6 +18,9 @@ final class SessionStore {
     private var cachedLiveCwds: Set<String> = []
     /// Called after each reload so the UI can update immediately.
     var onReload: (() -> Void)?
+    /// Rex program status records per block (RexStatusMonitor.records).
+    /// Injected so the store doesn't own a CLI process and stays testable.
+    var rexStatusRecords: () -> [String: [RexStatusRecord]] = { [:] }
 
     private static let sessionsDirectory: URL = {
         let dir = FileManager.default.homeDirectoryForCurrentUser
@@ -283,7 +286,11 @@ final class SessionStore {
             try? fm.removeItem(at: file)
         }
 
-        sessions = Self.sorted(deduped)
+        // Before sorting and the attention diff, so program status
+        // transitions sort and notify like hook ones
+        let withRexStatus = RexProgramStatus.applying(
+            rexStatusRecords(), to: deduped, source: RexStatusSource.current())
+        sessions = Self.sorted(withRexStatus)
 
         // Track sessions that just transitioned into needing attention
         let currentWaitingIds = Set(sessions.filter { $0.status.needsAttention }.map(\.sessionId))

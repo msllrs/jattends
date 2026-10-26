@@ -25,7 +25,7 @@ enum TerminalActivator {
 
     /// Append a line to ~/.claude/jattends/debug.log — activation failures
     /// are otherwise invisible (menu clicks have no UI for errors).
-    private static func log(_ message: String) {
+    static func log(_ message: String) {
         let url = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude/jattends/debug.log")
         let stamp = ISO8601DateFormatter().string(from: Date())
@@ -405,7 +405,7 @@ enum TerminalActivator {
     // MARK: - Rex multiplexer (block focus via the rex CLI)
 
     private static let rexBundleIdentifier = "com.superlogical.rex"
-    private static let rexBundledExecutable =
+    static let rexBundledExecutable =
         "/Applications/Rex Beta.app/Contents/Helpers/Rex Server.app/Contents/MacOS/rex"
 
     /// The `window: <id>` value from `rex block inspect` output, or nil
@@ -484,8 +484,8 @@ enum TerminalActivator {
 
     /// Run the rex CLI with a short timeout. Output is stdout+stderr,
     /// trimmed — used for parsing (inspect) and for logging failures.
-    private static func runRex(_ exe: String, _ args: [String],
-                               timeout: TimeInterval = 2) -> (ok: Bool, output: String) {
+    static func runRex(_ exe: String, _ args: [String],
+                       timeout: TimeInterval = 2) -> (ok: Bool, output: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: exe)
         process.arguments = args
