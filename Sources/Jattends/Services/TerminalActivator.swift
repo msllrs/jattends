@@ -82,7 +82,8 @@ enum TerminalActivator {
         }
 
         // Most precise: tag the session's tty with a unique window title via
-        // OSC 2, raise the window carrying it, then restore the title. Finds
+        // OSC 2, raise the window carrying it, then restore the window's
+        // previous title (snapshotted before marking). Finds
         // the exact tab even with several sessions in the same project.
         if activateByTitleMarker(session: session) {
             log("  -> title marker matched")
@@ -277,6 +278,55 @@ enum TerminalActivator {
         """
     }
 
+    /// AppleScript that lists every Ghostty surface as one "id<TAB>name"
+    /// line — the titles to restore after an OSC 2 marker overwrites one.
+    static func ghosttyTitleSnapshotScriptSource() -> String {
+        """
+        tell application "Ghostty"
+            set out to {}
+            repeat with t in terminals
+                set end of out to ((id of t) as text) & tab & ((name of t) as text)
+            end repeat
+            set AppleScript's text item delimiters to linefeed
+            set joined to out as text
+            set AppleScript's text item delimiters to ""
+            return joined
+        end tell
+        """
+    }
+
+    /// Parse the snapshot script's output into surface id → title. Titles
+    /// may be empty; blank lines are skipped.
+    static func parseGhosttyTitles(_ output: String) -> [String: String] {
+        var titles: [String: String] = [:]
+        for line in output.split(whereSeparator: \.isNewline) {
+            guard !line.isEmpty else { continue }
+            let parts = line.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)
+            let id = String(parts[0])
+            guard !id.isEmpty else { continue }
+            titles[id] = parts.count > 1 ? String(parts[1]) : ""
+        }
+        return titles
+    }
+
+    /// AppleScript that focuses the Ghostty surface whose title carries the
+    /// marker and returns its id (so its previous title can be restored), or
+    /// "not_found". Wrapped in `try` because `first terminal whose …` throws
+    /// when nothing matches.
+    static func ghosttyMarkerFocusScriptSource(marker: String) -> String {
+        """
+        tell application "Ghostty"
+            try
+                set t to (first terminal whose name contains \(appleScriptQuoted(marker)))
+                focus t
+                activate
+                return id of t
+            end try
+            return "not_found"
+        end tell
+        """
+    }
+
     private static func ghosttyIsRunning() -> Bool {
         isAppRunning(named: "Ghostty")
     }
@@ -286,42 +336,62 @@ enum TerminalActivator {
     }
 
     private static func runFocusScript(_ source: String, label: String) -> Bool {
+        let result = runScript(source, label: label)
+        if let result, result != "found" {
+            log("  \(label) script: \(result)")
+        }
+        return result == "found"
+    }
+
+    /// Run an AppleScript and return its string result, or nil when it fails
+    /// to compile/run (errors are logged under `label`).
+    private static func runScript(_ source: String, label: String) -> String? {
         guard let script = NSAppleScript(source: source) else {
             log("  \(label) script: failed to init NSAppleScript")
-            return false
+            return nil
         }
         var error: NSDictionary?
         let result = script.executeAndReturnError(&error)
         if let error {
             log("  \(label) script error: \(error[NSAppleScript.errorBriefMessage] ?? error)")
-            return false
+            return nil
         }
-        if result.stringValue != "found" {
-            log("  \(label) script: \(result.stringValue ?? "no result")")
-        }
-        return result.stringValue == "found"
+        return result.stringValue ?? ""
     }
 
     /// Tag the session's tty with a unique title via OSC 2, then focus the
     /// Ghostty surface carrying it. Surfaces keep their own titles, so this
-    /// finds the session's split even when it isn't the focused one.
+    /// finds the session's split even when it isn't the focused one. Every
+    /// surface's title is snapshotted first, and the marked surface's
+    /// previous title (e.g. Claude Code's session name) is written back.
     private static func activateGhosttySplitByMarker(session: SessionInfo) -> Bool {
         guard mayWriteTitleMarker(for: session),
               ghosttyIsRunning(),
               let tty = session.terminalTty, tty.hasPrefix("/dev/")
         else { return false }
 
+        let snapshot = parseGhosttyTitles(
+            runScript(ghosttyTitleSnapshotScriptSource(), label: "Ghostty title snapshot") ?? "")
+
         let marker = "__jattends_\(session.sessionId.prefix(8))__"
-        guard writeToTty(tty, "\u{1B}]2;\(marker)\u{07}") else {
+        guard writeToTty(tty, titleSequence(marker)) else {
             log("  Ghostty split: tty write failed for \(tty)")
             return false
         }
-        defer { _ = writeToTty(tty, "\u{1B}]2;\u{07}") } // restore default title
+        var markedId: String?
+        // Restore the marked surface's previous title ("" when unknown)
+        defer { _ = writeToTty(tty, titleSequence(titleToRestore(previous: snapshot, markedKey: markedId))) }
 
         // Give Ghostty a moment to process the escape sequence
         usleep(120_000)
 
-        return runFocusScript(ghosttyFocusScriptSource(needles: [marker]), label: "Ghostty split")
+        let result = runScript(ghosttyMarkerFocusScriptSource(marker: marker), label: "Ghostty split")
+        guard let result, !result.isEmpty, result != "not_found" else {
+            log("  Ghostty split script: \(result ?? "no result")")
+            return false
+        }
+        markedId = result
+        return true
     }
 
     /// Focus a Ghostty surface by session-name/project-name title match or
@@ -478,11 +548,33 @@ enum TerminalActivator {
     // MARK: - OSC 2 title-marker approach
 
     /// Whether an OSC 2 marker may be written to the session's tty. The
-    /// marker's "restore" writes an empty title, which wipes any title the
-    /// program set (Claude Code's session name) — Rex sessions are focused
-    /// by block ID instead, so their tty is never written to.
+    /// restore writes back the title snapshotted before marking, which is
+    /// best-effort (a terminal that decorates window titles restores the
+    /// decorated text; an unmatched surface restores an empty title) — Rex
+    /// sessions are focused exactly by block ID instead, so their tty is
+    /// never written to.
     static func mayWriteTitleMarker(for session: SessionInfo) -> Bool {
         session.terminalApp != "rex" && session.rexBlock == nil
+    }
+
+    /// The title to write back after marking: the marked surface/window's
+    /// snapshotted title, or "" (terminal default) when it's unknown or the
+    /// snapshot itself still shows a stale marker.
+    static func titleToRestore<K: Hashable>(previous: [K: String], markedKey: K?) -> String {
+        guard let markedKey, let title = previous[markedKey],
+              !title.contains("__jattends_")
+        else { return "" }
+        return title
+    }
+
+    /// OSC 2 set-title sequence. C0 controls and DEL are stripped so a
+    /// restored title can't end the sequence early (BEL/ESC) or inject
+    /// further escapes.
+    static func titleSequence(_ title: String) -> String {
+        let clean = String(String.UnicodeScalarView(title.unicodeScalars.filter {
+            $0.value >= 0x20 && $0.value != 0x7F
+        }))
+        return "\u{1B}]2;" + clean + "\u{07}"
     }
 
     /// Write a unique title to the session's tty, then raise the window whose
@@ -494,13 +586,6 @@ enum TerminalActivator {
               AXIsProcessTrusted(),
               let tty = session.terminalTty, tty.hasPrefix("/dev/")
         else { return false }
-
-        let marker = "__jattends_\(session.sessionId.prefix(8))__"
-        guard writeToTty(tty, "\u{1B}]2;\(marker)\u{07}") else { return false }
-        defer { _ = writeToTty(tty, "\u{1B}]2;\u{07}") } // restore default title
-
-        // Give the terminal a moment to process the escape sequence
-        usleep(120_000)
 
         // Known terminal PID: scan just that app. Agent sessions have none —
         // scan every running terminal app for the marker instead.
@@ -516,17 +601,38 @@ enum TerminalActivator {
                 .map { Int($0.processIdentifier) }
         }
 
+        // Snapshot every candidate window's title BEFORE marking. The window
+        // elements themselves are kept and re-read after marking, so the
+        // match maps back to its own snapshot even if the windows array
+        // reorders in between.
+        var windows: [(key: String, pid: Int, element: AXUIElement)] = []
+        var snapshot: [String: String] = [:]
         for pid in candidatePids {
             let appElement = AXUIElementCreateApplication(pid_t(pid))
             var windowsRef: CFTypeRef?
             guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef) == .success,
-                  let windows = windowsRef as? [AXUIElement]
+                  let appWindows = windowsRef as? [AXUIElement]
             else { continue }
+            for (index, window) in appWindows.enumerated() {
+                let key = "\(pid):\(index)"
+                windows.append((key, pid, window))
+                snapshot[key] = axStringAttribute(window, kAXTitleAttribute) ?? ""
+            }
+        }
 
-            for window in windows {
-                if let title = axStringAttribute(window, kAXTitleAttribute), title.contains(marker) {
-                    return raiseWindowAndActivate(window: window, pid: pid)
-                }
+        let marker = "__jattends_\(session.sessionId.prefix(8))__"
+        guard writeToTty(tty, titleSequence(marker)) else { return false }
+        var markedKey: String?
+        // Restore the marked window's previous title ("" when unknown)
+        defer { _ = writeToTty(tty, titleSequence(titleToRestore(previous: snapshot, markedKey: markedKey))) }
+
+        // Give the terminal a moment to process the escape sequence
+        usleep(120_000)
+
+        for window in windows {
+            if let title = axStringAttribute(window.element, kAXTitleAttribute), title.contains(marker) {
+                markedKey = window.key
+                return raiseWindowAndActivate(window: window.element, pid: window.pid)
             }
         }
         return false
