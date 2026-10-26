@@ -13,6 +13,7 @@ enum TerminalActivator {
         "WezTerm": "WezTerm",
         "Hyper": "Hyper",
         "vscode": "Code",
+        "rex": "Rex Beta",
         "tmux": "Ghostty", // tmux inherits parent; default to common host
     ]
 
@@ -49,6 +50,15 @@ enum TerminalActivator {
             hasPromptedAccessibility = true
             let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
             AXIsProcessTrustedWithOptions(opts)
+        }
+
+        // Rex is a multiplexer: the session's pane is addressed by its block
+        // ID via the rex CLI. Exact, and never touches the session's tty.
+        if session.rexBlock != nil {
+            if activateRexBlock(session: session) {
+                log("  -> Rex block focused")
+                return
+            }
         }
 
         // Most precise where the app's scripting API exposes ttys directly:
@@ -296,7 +306,8 @@ enum TerminalActivator {
     /// Ghostty surface carrying it. Surfaces keep their own titles, so this
     /// finds the session's split even when it isn't the focused one.
     private static func activateGhosttySplitByMarker(session: SessionInfo) -> Bool {
-        guard ghosttyIsRunning(),
+        guard mayWriteTitleMarker(for: session),
+              ghosttyIsRunning(),
               let tty = session.terminalTty, tty.hasPrefix("/dev/")
         else { return false }
 
@@ -319,6 +330,117 @@ enum TerminalActivator {
         guard ghosttyIsRunning() else { return false }
         return runFocusScript(ghosttyFocusScriptSource(
             needles: titleMatchNeedles(for: session), cwd: session.cwd), label: "Ghostty split")
+    }
+
+    // MARK: - Rex multiplexer (block focus via the rex CLI)
+
+    private static let rexBundleIdentifier = "com.superlogical.rex"
+    private static let rexBundledExecutable =
+        "/Applications/Rex Beta.app/Contents/Helpers/Rex Server.app/Contents/MacOS/rex"
+
+    /// The `window: <id>` value from `rex block inspect` output, or nil
+    /// for unplaced blocks.
+    static func rexWindowId(fromInspect output: String) -> String? {
+        for line in output.split(whereSeparator: \.isNewline) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("window:") else { continue }
+            let value = trimmed.dropFirst("window:".count).trimmingCharacters(in: .whitespaces)
+            return value.isEmpty ? nil : value
+        }
+        return nil
+    }
+
+    /// The rex CLI: the bin dir the hook saw, else the app bundle's copy.
+    static func rexExecutable(for session: SessionInfo) -> String {
+        if let dir = session.rexBinDir, !dir.isEmpty {
+            return URL(fileURLWithPath: dir).appendingPathComponent("rex").path
+        }
+        return rexBundledExecutable
+    }
+
+    /// Arguments for a click: switch Rex.app to the session/window (needs
+    /// Remote Control; failure tolerated), then focus the block. Never
+    /// autostart a server from a menu click.
+    static func rexFocusCommands(for session: SessionInfo, windowId: String?) -> [[String]] {
+        var commands: [[String]] = []
+        if let rexSession = session.rexSession {
+            var select = ["--autostart=false", "do", "session.select", "session_id=\(rexSession)"]
+            if let windowId { select.append("window_id=\(windowId)") }
+            commands.append(select)
+        }
+        if let block = session.rexBlock {
+            commands.append(["--autostart=false", "block", "focus", block])
+        }
+        return commands
+    }
+
+    /// Focus the session's Rex block and bring Rex.app forward. False when
+    /// the CLI is missing or the block is gone (inspect/focus failed).
+    private static func activateRexBlock(session: SessionInfo) -> Bool {
+        guard let block = session.rexBlock else { return false }
+        let exe = rexExecutable(for: session)
+        guard FileManager.default.isExecutableFile(atPath: exe) else {
+            log("  Rex: no executable at \(exe)")
+            return false
+        }
+
+        let inspect = runRex(exe, ["--autostart=false", "block", "inspect", block])
+        guard inspect.ok else {
+            log("  Rex: block inspect failed (\(inspect.output))")
+            return false
+        }
+        let windowId = rexWindowId(fromInspect: inspect.output)
+
+        for args in rexFocusCommands(for: session, windowId: windowId) {
+            let result = runRex(exe, args)
+            if args.contains("session.select") {
+                // Needs Remote Control enabled in Rex.app; focus still works
+                if !result.ok { log("  Rex: session.select failed (\(result.output))") }
+            } else if !result.ok {
+                log("  Rex: \(args.joined(separator: " ")) failed (\(result.output))")
+                return false
+            }
+        }
+
+        if let app = NSRunningApplication.runningApplications(
+            withBundleIdentifier: rexBundleIdentifier).first {
+            if app.isHidden { app.unhide() }
+            app.activate()
+        } else {
+            log("  Rex: app not running")
+        }
+        return true
+    }
+
+    /// Run the rex CLI with a short timeout. Output is stdout+stderr,
+    /// trimmed — used for parsing (inspect) and for logging failures.
+    private static func runRex(_ exe: String, _ args: [String],
+                               timeout: TimeInterval = 2) -> (ok: Bool, output: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: exe)
+        process.arguments = args
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+        process.standardInput = FileHandle.nullDevice
+
+        let done = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in done.signal() }
+        do {
+            try process.run()
+        } catch {
+            return (false, "launch failed: \(error.localizedDescription)")
+        }
+        if done.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            _ = done.wait(timeout: .now() + 0.5)
+            return (false, "timed out after \(timeout)s")
+        }
+        let out = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let err = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let combined = (out + err).trimmingCharacters(in: .whitespacesAndNewlines)
+        return (process.terminationStatus == 0, combined)
     }
 
     // MARK: - Cross-app window title search (for sessions without a terminal PID)
@@ -355,12 +477,21 @@ enum TerminalActivator {
 
     // MARK: - OSC 2 title-marker approach
 
+    /// Whether an OSC 2 marker may be written to the session's tty. The
+    /// marker's "restore" writes an empty title, which wipes any title the
+    /// program set (Claude Code's session name) — Rex sessions are focused
+    /// by block ID instead, so their tty is never written to.
+    static func mayWriteTitleMarker(for session: SessionInfo) -> Bool {
+        session.terminalApp != "rex" && session.rexBlock == nil
+    }
+
     /// Write a unique title to the session's tty, then raise the window whose
     /// AXTitle contains it. Works with any terminal that honors OSC 2 —
     /// including agent sessions, whose daemon-created pty forwards the escape
     /// to whichever terminal window displays them.
     private static func activateByTitleMarker(session: SessionInfo) -> Bool {
-        guard AXIsProcessTrusted(),
+        guard mayWriteTitleMarker(for: session),
+              AXIsProcessTrusted(),
               let tty = session.terminalTty, tty.hasPrefix("/dev/")
         else { return false }
 
