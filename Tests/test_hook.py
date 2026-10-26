@@ -799,5 +799,33 @@ class ClaudeSessionRecordTests(HookTestCase):
         self.assertNotIn("trackedBy", s)
 
 
+class RexTests(HookTestCase):
+    """Rex is a multiplexer: claude's parent is the rex server daemon, not a
+    GUI app, so the pane can only be found by the block ID Rex exports."""
+
+    REX_ENV = {
+        "TERM_PROGRAM": "rex",
+        "REX_BLOCK": "block:01a17930-e285-72f1-af70-533882e2596c",
+        "REX_SESSION": "session:01a17930-e285-7071-9c29-96dbb57b5fff",
+        "REX_BIN_DIR": "/Applications/Rex Beta.app/Contents/Helpers/Rex Server.app/Contents/MacOS",
+    }
+
+    def test_records_rex_block_and_session(self):
+        self.env.update(self.REX_ENV)
+        self.fire("UserPromptSubmit", prompt="go")
+        s = self.read_session()
+        self.assertEqual(s["rexBlock"], self.REX_ENV["REX_BLOCK"])
+        self.assertEqual(s["rexSession"], self.REX_ENV["REX_SESSION"])
+        self.assertEqual(s["rexBinDir"], self.REX_ENV["REX_BIN_DIR"])
+
+    def test_no_rex_fields_outside_rex(self):
+        for k in ("REX_BLOCK", "REX_SESSION", "REX_BIN_DIR"):
+            self.env.pop(k, None)
+        self.fire("UserPromptSubmit", prompt="go")
+        s = self.read_session()
+        self.assertNotIn("rexBlock", s)
+        self.assertNotIn("rexSession", s)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

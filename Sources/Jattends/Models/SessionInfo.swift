@@ -17,6 +17,13 @@ struct SessionInfo: Codable, Identifiable {
     let terminalApp: String?
     let terminalPid: Int?
     let terminalTty: String?
+    /// Rex multiplexer block ID (REX_BLOCK) — the pane claude runs in.
+    /// Rex sessions run under the rex server daemon, so terminalPid is nil.
+    let rexBlock: String?
+    /// Rex session ID (REX_SESSION) owning the block.
+    let rexSession: String?
+    /// Directory holding the `rex` CLI, as seen by the hook.
+    let rexBinDir: String?
     let claudePid: Int?
     let updatedAt: Date
     let statusDetail: String?
@@ -36,6 +43,9 @@ struct SessionInfo: Codable, Identifiable {
         terminalApp: String? = nil,
         terminalPid: Int? = nil,
         terminalTty: String? = nil,
+        rexBlock: String? = nil,
+        rexSession: String? = nil,
+        rexBinDir: String? = nil,
         claudePid: Int? = nil,
         updatedAt: Date = Date(),
         statusDetail: String? = nil,
@@ -54,6 +64,9 @@ struct SessionInfo: Codable, Identifiable {
         self.terminalApp = terminalApp
         self.terminalPid = terminalPid
         self.terminalTty = terminalTty
+        self.rexBlock = rexBlock
+        self.rexSession = rexSession
+        self.rexBinDir = rexBinDir
         self.claudePid = claudePid
         self.updatedAt = updatedAt
         self.statusDetail = statusDetail

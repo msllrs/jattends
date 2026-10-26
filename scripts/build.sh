@@ -32,7 +32,7 @@ cp "$PROJECT_DIR/Resources/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.ic
 # revokes the grant and breaks window activation until re-granted.
 IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
     | grep -oE '"(Developer ID Application|Apple Development)[^"]*"' \
-    | head -1 | tr -d '"')
+    | head -1 | tr -d '"' || true)
 if [ -n "$IDENTITY" ]; then
     echo "Signing with: $IDENTITY"
     # The entitlements matter: hardened runtime (--options runtime) denies

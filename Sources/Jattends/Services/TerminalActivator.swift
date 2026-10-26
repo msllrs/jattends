@@ -13,6 +13,7 @@ enum TerminalActivator {
         "WezTerm": "WezTerm",
         "Hyper": "Hyper",
         "vscode": "Code",
+        "rex": "Rex Beta",
         "tmux": "Ghostty", // tmux inherits parent; default to common host
     ]
 
@@ -51,6 +52,15 @@ enum TerminalActivator {
             AXIsProcessTrustedWithOptions(opts)
         }
 
+        // Rex is a multiplexer: the session's pane is addressed by its block
+        // ID via the rex CLI. Exact, and never touches the session's tty.
+        if session.rexBlock != nil {
+            if activateRexBlock(session: session) {
+                log("  -> Rex block focused")
+                return
+            }
+        }
+
         // Most precise where the app's scripting API exposes ttys directly:
         // iTerm2 split panes and Terminal.app tabs are scriptable objects
         // with a `tty` property, so the session's pane is an exact lookup —
@@ -72,7 +82,8 @@ enum TerminalActivator {
         }
 
         // Most precise: tag the session's tty with a unique window title via
-        // OSC 2, raise the window carrying it, then restore the title. Finds
+        // OSC 2, raise the window carrying it, then restore the window's
+        // previous title (snapshotted before marking). Finds
         // the exact tab even with several sessions in the same project.
         if activateByTitleMarker(session: session) {
             log("  -> title marker matched")
@@ -267,6 +278,55 @@ enum TerminalActivator {
         """
     }
 
+    /// AppleScript that lists every Ghostty surface as one "id<TAB>name"
+    /// line — the titles to restore after an OSC 2 marker overwrites one.
+    static func ghosttyTitleSnapshotScriptSource() -> String {
+        """
+        tell application "Ghostty"
+            set out to {}
+            repeat with t in terminals
+                set end of out to ((id of t) as text) & tab & ((name of t) as text)
+            end repeat
+            set AppleScript's text item delimiters to linefeed
+            set joined to out as text
+            set AppleScript's text item delimiters to ""
+            return joined
+        end tell
+        """
+    }
+
+    /// Parse the snapshot script's output into surface id → title. Titles
+    /// may be empty; blank lines are skipped.
+    static func parseGhosttyTitles(_ output: String) -> [String: String] {
+        var titles: [String: String] = [:]
+        for line in output.split(whereSeparator: \.isNewline) {
+            guard !line.isEmpty else { continue }
+            let parts = line.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)
+            let id = String(parts[0])
+            guard !id.isEmpty else { continue }
+            titles[id] = parts.count > 1 ? String(parts[1]) : ""
+        }
+        return titles
+    }
+
+    /// AppleScript that focuses the Ghostty surface whose title carries the
+    /// marker and returns its id (so its previous title can be restored), or
+    /// "not_found". Wrapped in `try` because `first terminal whose …` throws
+    /// when nothing matches.
+    static func ghosttyMarkerFocusScriptSource(marker: String) -> String {
+        """
+        tell application "Ghostty"
+            try
+                set t to (first terminal whose name contains \(appleScriptQuoted(marker)))
+                focus t
+                activate
+                return id of t
+            end try
+            return "not_found"
+        end tell
+        """
+    }
+
     private static func ghosttyIsRunning() -> Bool {
         isAppRunning(named: "Ghostty")
     }
@@ -276,41 +336,62 @@ enum TerminalActivator {
     }
 
     private static func runFocusScript(_ source: String, label: String) -> Bool {
+        let result = runScript(source, label: label)
+        if let result, result != "found" {
+            log("  \(label) script: \(result)")
+        }
+        return result == "found"
+    }
+
+    /// Run an AppleScript and return its string result, or nil when it fails
+    /// to compile/run (errors are logged under `label`).
+    private static func runScript(_ source: String, label: String) -> String? {
         guard let script = NSAppleScript(source: source) else {
             log("  \(label) script: failed to init NSAppleScript")
-            return false
+            return nil
         }
         var error: NSDictionary?
         let result = script.executeAndReturnError(&error)
         if let error {
             log("  \(label) script error: \(error[NSAppleScript.errorBriefMessage] ?? error)")
-            return false
+            return nil
         }
-        if result.stringValue != "found" {
-            log("  \(label) script: \(result.stringValue ?? "no result")")
-        }
-        return result.stringValue == "found"
+        return result.stringValue ?? ""
     }
 
     /// Tag the session's tty with a unique title via OSC 2, then focus the
     /// Ghostty surface carrying it. Surfaces keep their own titles, so this
-    /// finds the session's split even when it isn't the focused one.
+    /// finds the session's split even when it isn't the focused one. Every
+    /// surface's title is snapshotted first, and the marked surface's
+    /// previous title (e.g. Claude Code's session name) is written back.
     private static func activateGhosttySplitByMarker(session: SessionInfo) -> Bool {
-        guard ghosttyIsRunning(),
+        guard mayWriteTitleMarker(for: session),
+              ghosttyIsRunning(),
               let tty = session.terminalTty, tty.hasPrefix("/dev/")
         else { return false }
 
+        let snapshot = parseGhosttyTitles(
+            runScript(ghosttyTitleSnapshotScriptSource(), label: "Ghostty title snapshot") ?? "")
+
         let marker = "__jattends_\(session.sessionId.prefix(8))__"
-        guard writeToTty(tty, "\u{1B}]2;\(marker)\u{07}") else {
+        guard writeToTty(tty, titleSequence(marker)) else {
             log("  Ghostty split: tty write failed for \(tty)")
             return false
         }
-        defer { _ = writeToTty(tty, "\u{1B}]2;\u{07}") } // restore default title
+        var markedId: String?
+        // Restore the marked surface's previous title ("" when unknown)
+        defer { _ = writeToTty(tty, titleSequence(titleToRestore(previous: snapshot, markedKey: markedId))) }
 
         // Give Ghostty a moment to process the escape sequence
         usleep(120_000)
 
-        return runFocusScript(ghosttyFocusScriptSource(needles: [marker]), label: "Ghostty split")
+        let result = runScript(ghosttyMarkerFocusScriptSource(marker: marker), label: "Ghostty split")
+        guard let result, !result.isEmpty, result != "not_found" else {
+            log("  Ghostty split script: \(result ?? "no result")")
+            return false
+        }
+        markedId = result
+        return true
     }
 
     /// Focus a Ghostty surface by session-name/project-name title match or
@@ -319,6 +400,117 @@ enum TerminalActivator {
         guard ghosttyIsRunning() else { return false }
         return runFocusScript(ghosttyFocusScriptSource(
             needles: titleMatchNeedles(for: session), cwd: session.cwd), label: "Ghostty split")
+    }
+
+    // MARK: - Rex multiplexer (block focus via the rex CLI)
+
+    private static let rexBundleIdentifier = "com.superlogical.rex"
+    private static let rexBundledExecutable =
+        "/Applications/Rex Beta.app/Contents/Helpers/Rex Server.app/Contents/MacOS/rex"
+
+    /// The `window: <id>` value from `rex block inspect` output, or nil
+    /// for unplaced blocks.
+    static func rexWindowId(fromInspect output: String) -> String? {
+        for line in output.split(whereSeparator: \.isNewline) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("window:") else { continue }
+            let value = trimmed.dropFirst("window:".count).trimmingCharacters(in: .whitespaces)
+            return value.isEmpty ? nil : value
+        }
+        return nil
+    }
+
+    /// The rex CLI: the bin dir the hook saw, else the app bundle's copy.
+    static func rexExecutable(for session: SessionInfo) -> String {
+        if let dir = session.rexBinDir, !dir.isEmpty {
+            return URL(fileURLWithPath: dir).appendingPathComponent("rex").path
+        }
+        return rexBundledExecutable
+    }
+
+    /// Arguments for a click: switch Rex.app to the session/window (needs
+    /// Remote Control; failure tolerated), then focus the block. Never
+    /// autostart a server from a menu click.
+    static func rexFocusCommands(for session: SessionInfo, windowId: String?) -> [[String]] {
+        var commands: [[String]] = []
+        if let rexSession = session.rexSession {
+            var select = ["--autostart=false", "do", "session.select", "session_id=\(rexSession)"]
+            if let windowId { select.append("window_id=\(windowId)") }
+            commands.append(select)
+        }
+        if let block = session.rexBlock {
+            commands.append(["--autostart=false", "block", "focus", block])
+        }
+        return commands
+    }
+
+    /// Focus the session's Rex block and bring Rex.app forward. False when
+    /// the CLI is missing or the block is gone (inspect/focus failed).
+    private static func activateRexBlock(session: SessionInfo) -> Bool {
+        guard let block = session.rexBlock else { return false }
+        let exe = rexExecutable(for: session)
+        guard FileManager.default.isExecutableFile(atPath: exe) else {
+            log("  Rex: no executable at \(exe)")
+            return false
+        }
+
+        let inspect = runRex(exe, ["--autostart=false", "block", "inspect", block])
+        guard inspect.ok else {
+            log("  Rex: block inspect failed (\(inspect.output))")
+            return false
+        }
+        let windowId = rexWindowId(fromInspect: inspect.output)
+
+        for args in rexFocusCommands(for: session, windowId: windowId) {
+            let result = runRex(exe, args)
+            if args.contains("session.select") {
+                // Needs Remote Control enabled in Rex.app; focus still works
+                if !result.ok { log("  Rex: session.select failed (\(result.output))") }
+            } else if !result.ok {
+                log("  Rex: \(args.joined(separator: " ")) failed (\(result.output))")
+                return false
+            }
+        }
+
+        if let app = NSRunningApplication.runningApplications(
+            withBundleIdentifier: rexBundleIdentifier).first {
+            if app.isHidden { app.unhide() }
+            app.activate()
+        } else {
+            log("  Rex: app not running")
+        }
+        return true
+    }
+
+    /// Run the rex CLI with a short timeout. Output is stdout+stderr,
+    /// trimmed — used for parsing (inspect) and for logging failures.
+    private static func runRex(_ exe: String, _ args: [String],
+                               timeout: TimeInterval = 2) -> (ok: Bool, output: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: exe)
+        process.arguments = args
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+        process.standardInput = FileHandle.nullDevice
+
+        let done = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in done.signal() }
+        do {
+            try process.run()
+        } catch {
+            return (false, "launch failed: \(error.localizedDescription)")
+        }
+        if done.wait(timeout: .now() + timeout) == .timedOut {
+            process.terminate()
+            _ = done.wait(timeout: .now() + 0.5)
+            return (false, "timed out after \(timeout)s")
+        }
+        let out = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let err = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let combined = (out + err).trimmingCharacters(in: .whitespacesAndNewlines)
+        return (process.terminationStatus == 0, combined)
     }
 
     // MARK: - Cross-app window title search (for sessions without a terminal PID)
@@ -355,21 +547,45 @@ enum TerminalActivator {
 
     // MARK: - OSC 2 title-marker approach
 
+    /// Whether an OSC 2 marker may be written to the session's tty. The
+    /// restore writes back the title snapshotted before marking, which is
+    /// best-effort (a terminal that decorates window titles restores the
+    /// decorated text; an unmatched surface restores an empty title) — Rex
+    /// sessions are focused exactly by block ID instead, so their tty is
+    /// never written to.
+    static func mayWriteTitleMarker(for session: SessionInfo) -> Bool {
+        session.terminalApp != "rex" && session.rexBlock == nil
+    }
+
+    /// The title to write back after marking: the marked surface/window's
+    /// snapshotted title, or "" (terminal default) when it's unknown or the
+    /// snapshot itself still shows a stale marker.
+    static func titleToRestore<K: Hashable>(previous: [K: String], markedKey: K?) -> String {
+        guard let markedKey, let title = previous[markedKey],
+              !title.contains("__jattends_")
+        else { return "" }
+        return title
+    }
+
+    /// OSC 2 set-title sequence. C0 controls and DEL are stripped so a
+    /// restored title can't end the sequence early (BEL/ESC) or inject
+    /// further escapes.
+    static func titleSequence(_ title: String) -> String {
+        let clean = String(String.UnicodeScalarView(title.unicodeScalars.filter {
+            $0.value >= 0x20 && $0.value != 0x7F
+        }))
+        return "\u{1B}]2;" + clean + "\u{07}"
+    }
+
     /// Write a unique title to the session's tty, then raise the window whose
     /// AXTitle contains it. Works with any terminal that honors OSC 2 —
     /// including agent sessions, whose daemon-created pty forwards the escape
     /// to whichever terminal window displays them.
     private static func activateByTitleMarker(session: SessionInfo) -> Bool {
-        guard AXIsProcessTrusted(),
+        guard mayWriteTitleMarker(for: session),
+              AXIsProcessTrusted(),
               let tty = session.terminalTty, tty.hasPrefix("/dev/")
         else { return false }
-
-        let marker = "__jattends_\(session.sessionId.prefix(8))__"
-        guard writeToTty(tty, "\u{1B}]2;\(marker)\u{07}") else { return false }
-        defer { _ = writeToTty(tty, "\u{1B}]2;\u{07}") } // restore default title
-
-        // Give the terminal a moment to process the escape sequence
-        usleep(120_000)
 
         // Known terminal PID: scan just that app. Agent sessions have none —
         // scan every running terminal app for the marker instead.
@@ -385,17 +601,38 @@ enum TerminalActivator {
                 .map { Int($0.processIdentifier) }
         }
 
+        // Snapshot every candidate window's title BEFORE marking. The window
+        // elements themselves are kept and re-read after marking, so the
+        // match maps back to its own snapshot even if the windows array
+        // reorders in between.
+        var windows: [(key: String, pid: Int, element: AXUIElement)] = []
+        var snapshot: [String: String] = [:]
         for pid in candidatePids {
             let appElement = AXUIElementCreateApplication(pid_t(pid))
             var windowsRef: CFTypeRef?
             guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef) == .success,
-                  let windows = windowsRef as? [AXUIElement]
+                  let appWindows = windowsRef as? [AXUIElement]
             else { continue }
+            for (index, window) in appWindows.enumerated() {
+                let key = "\(pid):\(index)"
+                windows.append((key, pid, window))
+                snapshot[key] = axStringAttribute(window, kAXTitleAttribute) ?? ""
+            }
+        }
 
-            for window in windows {
-                if let title = axStringAttribute(window, kAXTitleAttribute), title.contains(marker) {
-                    return raiseWindowAndActivate(window: window, pid: pid)
-                }
+        let marker = "__jattends_\(session.sessionId.prefix(8))__"
+        guard writeToTty(tty, titleSequence(marker)) else { return false }
+        var markedKey: String?
+        // Restore the marked window's previous title ("" when unknown)
+        defer { _ = writeToTty(tty, titleSequence(titleToRestore(previous: snapshot, markedKey: markedKey))) }
+
+        // Give the terminal a moment to process the escape sequence
+        usleep(120_000)
+
+        for window in windows {
+            if let title = axStringAttribute(window.element, kAXTitleAttribute), title.contains(marker) {
+                markedKey = window.key
+                return raiseWindowAndActivate(window: window.element, pid: window.pid)
             }
         }
         return false
