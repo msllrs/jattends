@@ -11,6 +11,12 @@ final class ApprovalStore {
     /// Called after every reload so the UI can refresh.
     var onReload: (() -> Void)?
 
+    /// Pending requests from agents answered over their own API (opencode,
+    /// via OpencodeMonitor.pendingApprovals) rather than hook files.
+    var externalPending: () -> [ApprovalRequest] = { [] }
+    /// Answers an external request; called instead of writing a decision.
+    var respondExternal: (ApprovalRequest, Bool) -> Void = { _, _ in }
+
     private var watcher: SessionDirectoryWatcher?
     private var knownIds: Set<String> = []
 
@@ -39,6 +45,12 @@ final class ApprovalStore {
     /// Answer a request. The hook polls for the decision file, forwards the
     /// decision to Claude Code, and deletes both files.
     func respond(to request: ApprovalRequest, allow: Bool) {
+        if request.agent != nil {
+            respondExternal(request, allow)
+            pending.removeAll { $0.requestId == request.requestId }
+            onReload?()
+            return
+        }
         let decision: [String: String] = allow
             ? ["behavior": "allow"]
             : ["behavior": "deny", "reason": "Denied from Jattends"]
@@ -55,12 +67,8 @@ final class ApprovalStore {
 
     func reload() {
         let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(
-            at: Self.approvalsDirectory, includingPropertiesForKeys: nil)
-        else {
-            pending = []
-            return
-        }
+        let files = (try? fm.contentsOfDirectory(
+            at: Self.approvalsDirectory, includingPropertiesForKeys: nil)) ?? []
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
@@ -86,6 +94,9 @@ final class ApprovalStore {
             requests.append(request)
         }
 
+        // External requests don't expire: opencode waits for an answer
+        // indefinitely, and drops them itself once answered elsewhere
+        requests.append(contentsOf: externalPending())
         requests.sort { $0.createdAt < $1.createdAt }
         pending = requests
 

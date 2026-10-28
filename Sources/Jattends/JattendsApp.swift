@@ -16,6 +16,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let approvalStore = ApprovalStore()
     private let rexStatusMonitor = RexStatusMonitor()
     private var rexStatusSource = RexStatusSource.current()
+    private let opencodeMonitor = OpencodeMonitor()
+    private var opencodeEnabled = OpencodeClient.isEnabled()
     private var dotUrgency: BadgeDotModel.Urgency?
     private var dotLayer: CALayer?
     private var dotGeneration = 0
@@ -66,6 +68,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.updateIconIfNeeded()
         }
         setUpRexStatus()
+        setUpOpencode()
         store.refreshLiveCwds()
         store.startWatching()
 
@@ -129,6 +132,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             self?.scanForSessions()
             self?.store.refreshLiveCwds()
+            self?.opencodeMonitor.refreshTerminals()
             self?.store.forceReload()
             self?.checkHookHealth()
         }
@@ -164,6 +168,45 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             rexStatusMonitor.stop()
         }
         store.forceReload()
+    }
+
+    /// opencode sessions come from its background service's event stream,
+    /// not hooks; the monitor runs while the setting is on (default).
+    private func setUpOpencode() {
+        store.externalSessions = { [weak self] in self?.opencodeMonitor.sessions ?? [] }
+        store.dismissExternal = { [weak self] session in
+            self?.opencodeMonitor.dismiss(sessionID: session.sessionId)
+        }
+        approvalStore.externalPending = { [weak self] in self?.opencodeMonitor.pendingApprovals ?? [] }
+        approvalStore.respondExternal = { [weak self] request, allow in
+            self?.opencodeMonitor.respond(requestID: request.requestId, sessionID: request.sessionId, allow: allow)
+        }
+        opencodeMonitor.onChange = { [weak self] in
+            self?.store.forceReload()
+            self?.approvalStore.reload()
+        }
+        if opencodeEnabled {
+            opencodeMonitor.start()
+        }
+        // Settings writes the toggle straight to UserDefaults
+        NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.opencodeEnabledMayHaveChanged()
+        }
+    }
+
+    private func opencodeEnabledMayHaveChanged() {
+        let enabled = OpencodeClient.isEnabled()
+        guard enabled != opencodeEnabled else { return }
+        opencodeEnabled = enabled
+        if enabled {
+            opencodeMonitor.start()
+        } else {
+            opencodeMonitor.stop()
+        }
     }
 
     /// Insurance against other tools rewriting ~/.claude/settings.json and
@@ -605,6 +648,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if projectLeads, let elapsed {
             parts.append(elapsed)
+        }
+
+        // Claude Code is the default; name any other agent
+        if let agent = session.agent {
+            parts.append(agent)
         }
 
         return Self.makeMenuItemTitle(

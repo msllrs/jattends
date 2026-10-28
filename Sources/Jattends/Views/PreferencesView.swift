@@ -18,6 +18,7 @@ struct PreferencesView: View {
     @AppStorage("hotkeyModifiers") private var hotkeyModifiers = HotkeyManager.defaultModifiers
     @AppStorage("backgroundSessions") private var backgroundSessions = "all"
     @AppStorage(RexStatusSource.defaultsKey) private var rexStatusSource = RexStatusSource.programStatus.rawValue
+    @AppStorage(OpencodeClient.enabledKey) private var opencodeEnabled = true
 
     @State private var isRecordingShortcut = false
 
@@ -117,6 +118,15 @@ struct PreferencesView: View {
                 Text("Rex")
             } footer: {
                 Text("Program status is reported by Claude Code to Rex directly (OSC 7501), so it updates the moment a pane changes. Hooks are still used to discover sessions and for approvals.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("Track opencode sessions", isOn: $opencodeEnabled)
+            } header: {
+                Text("opencode")
+            } footer: {
+                Text("Jattends connects to opencode's background service — no plugin needed. Approvals answer once.")
                     .foregroundStyle(.secondary)
             }
 

@@ -32,6 +32,9 @@ struct SessionInfo: Codable, Identifiable {
     let transcriptPath: String?
     let subagentCount: Int?
     let turnStartedAt: Date?
+    /// Which agent runs the session: nil for Claude Code (hook-written
+    /// files never set it), "opencode" for sessions from OpencodeMonitor.
+    let agent: String?
 
     init(
         sessionId: String,
@@ -53,7 +56,8 @@ struct SessionInfo: Codable, Identifiable {
         permissionMode: String? = nil,
         transcriptPath: String? = nil,
         subagentCount: Int? = nil,
-        turnStartedAt: Date? = nil
+        turnStartedAt: Date? = nil,
+        agent: String? = nil
     ) {
         self.sessionId = sessionId
         self.cwd = cwd
@@ -75,6 +79,7 @@ struct SessionInfo: Codable, Identifiable {
         self.transcriptPath = transcriptPath
         self.subagentCount = subagentCount
         self.turnStartedAt = turnStartedAt
+        self.agent = agent
     }
 
     /// Compact elapsed-time label: "42s", "6m", "1h 12m".
