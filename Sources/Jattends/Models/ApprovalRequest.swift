@@ -10,6 +10,10 @@ struct ApprovalRequest: Codable, Identifiable {
     let toolName: String
     let summary: String
     let createdAt: Date
+    /// nil for Claude Code requests (the hook's files don't carry it);
+    /// "opencode" for requests answered over opencode's API instead of a
+    /// decision file.
+    var agent: String? = nil
 
     var id: String { requestId }
 

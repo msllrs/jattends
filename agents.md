@@ -90,6 +90,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test  # Swift tes
 | `soundRepeat` | Bool | `false` | Repeat sound until dismissed |
 | `autoClearMinutes` | Int | `0` | Auto-dismiss attention sessions after N minutes |
 | `backgroundSessions` | String | `"all"` | Background section visibility: `all` / `active` (working or compacting only) / `hidden`. Attention rows always surface |
+| `opencodeEnabled` | Bool | `true` | Follow opencode's background service (SSE `/api/event`) for opencode sessions and approvals |
 | `hotkeyEnabled` | Bool | `false` | Enable global keyboard shortcut |
 | `hotkeyKeyCode` | Int | `38` (J) | Key code for shortcut |
 | `hotkeyModifiers` | Int | Cmd+Shift | Modifier flags for shortcut |

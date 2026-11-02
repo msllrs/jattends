@@ -17,6 +17,8 @@ struct PreferencesView: View {
     @AppStorage("hotkeyKeyCode") private var hotkeyKeyCode = HotkeyManager.defaultKeyCode
     @AppStorage("hotkeyModifiers") private var hotkeyModifiers = HotkeyManager.defaultModifiers
     @AppStorage("backgroundSessions") private var backgroundSessions = "all"
+    @AppStorage(RexStatusSource.defaultsKey) private var rexStatusSource = RexStatusSource.programStatus.rawValue
+    @AppStorage(OpencodeClient.enabledKey) private var opencodeEnabled = true
 
     @State private var isRecordingShortcut = false
 
@@ -104,6 +106,27 @@ struct PreferencesView: View {
                 Text("Approvals")
             } footer: {
                 Text("When Claude asks for permission, answer from Jattends — no window switching. Requests show in the menu with a red dot; turn on approval notifications above to Approve/Deny without opening it. If you don't answer in time, the prompt appears in the terminal as usual.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Picker("Session status from", selection: $rexStatusSource) {
+                    Text("Rex program status").tag(RexStatusSource.programStatus.rawValue)
+                    Text("Claude Code hooks").tag(RexStatusSource.hooks.rawValue)
+                }
+            } header: {
+                Text("Rex")
+            } footer: {
+                Text("Program status is reported by Claude Code to Rex directly (OSC 7501), so it updates the moment a pane changes. Hooks are still used to discover sessions and for approvals.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("Track opencode sessions", isOn: $opencodeEnabled)
+            } header: {
+                Text("opencode")
+            } footer: {
+                Text("Jattends connects to opencode's background service — no plugin needed. Approvals answer once.")
                     .foregroundStyle(.secondary)
             }
 

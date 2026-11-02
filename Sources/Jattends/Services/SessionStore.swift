@@ -18,6 +18,16 @@ final class SessionStore {
     private var cachedLiveCwds: Set<String> = []
     /// Called after each reload so the UI can update immediately.
     var onReload: (() -> Void)?
+    /// Rex program status records per block (RexStatusMonitor.records).
+    /// Injected so the store doesn't own a CLI process and stays testable.
+    var rexStatusRecords: () -> [String: [RexStatusRecord]] = { [:] }
+    /// Sessions from agents that don't write session files (opencode, via
+    /// OpencodeMonitor.sessions). Their source owns liveness, so they skip
+    /// the file/pid checks and dedupe, but sort and notify like the rest.
+    var externalSessions: () -> [SessionInfo] = { [] }
+    /// Hides an external session until its next activity — the source
+    /// keeps the tombstone, since there's no file to remove.
+    var dismissExternal: (SessionInfo) -> Void = { _ in }
 
     private static let sessionsDirectory: URL = {
         let dir = FileManager.default.homeDirectoryForCurrentUser
@@ -52,6 +62,11 @@ final class SessionStore {
     /// scan won't resurrect it, then remove its file. Any real hook event
     /// clears the tombstone and the session reappears.
     func dismiss(_ session: SessionInfo) {
+        if session.agent != nil {
+            dismissExternal(session)
+            forceReload()
+            return
+        }
         let fm = FileManager.default
         fm.createFile(atPath: Self.dismissedDirectory
             .appendingPathComponent("session-\(session.sessionId)").path, contents: nil)
@@ -283,7 +298,15 @@ final class SessionStore {
             try? fm.removeItem(at: file)
         }
 
-        sessions = Self.sorted(deduped)
+        // Before sorting and the attention diff, so program status
+        // transitions sort and notify like hook ones
+        let withRexStatus = RexProgramStatus.applying(
+            rexStatusRecords(), to: deduped, source: RexStatusSource.current())
+        let external = externalSessions().filter { session in
+            guard let interval = autoClearInterval, session.status.needsAttention else { return true }
+            return Date().timeIntervalSince(session.updatedAt) <= interval
+        }
+        sessions = Self.sorted(withRexStatus + external)
 
         // Track sessions that just transitioned into needing attention
         let currentWaitingIds = Set(sessions.filter { $0.status.needsAttention }.map(\.sessionId))
